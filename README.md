@@ -1,111 +1,68 @@
 <p align="center">
-  <img src="./assets/readme/hero-banner.png" alt="8xd.io pixel banner showing a quiet blue-robed figure overlooking misty mountain infrastructure" width="100%">
+  <img src="./assets/readme/hero-banner.png" alt="8xd.io banner" width="100%">
 </p>
 
-# 8xd.io Monorepo
+<p align="center">
+  中文 · <a href="./README.en.md">English</a>
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-0f8f8c)
-![Node](https://img.shields.io/badge/node-%3E%3D20-15212f)
-![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-f4b860)
-![Structure](https://img.shields.io/badge/structure-public%20monorepo-657386)
+# 8xd.io
 
-**中文**：这是 8xd.io 的公开主仓库，用来统一管理这个域名下的前端、后端、边缘服务、共享组件、Skills、工作流和基础设施模板。
+8xd.io 用来承载我公开发布的小工具、页面、图床、分享内容和可复用能力。
 
-**English**: This is the public root repository for 8xd.io, organized as a monorepo for frontends, backends, edge services, shared packages, skills, workflows, and infrastructure templates.
+它不是单个产品，也不是一个临时 demo 文件夹。它更像一个长期生长的公开工作台：新的想法可以先轻量落在这里，稳定之后再变成独立应用、服务、组件或自动化能力。
 
-## Repository Shape / 仓库结构
+## 它能做什么
 
-```text
-8xd-io/
-  apps/                 # Domain-facing applications and large public modules
-  services/             # APIs, workers, queues, and backend services
-  packages/             # Shared UI, config, utilities, and reusable code
-  skills/               # Public agent skills, workflows, and prompt templates
-  infra/                # Public infrastructure templates and deployment notes
-  docs/                 # Architecture notes and runbooks
-  assets/readme/        # README images and visual assets
-  scripts/              # Public maintenance scripts
-  templates/            # Starter templates for future modules
-```
+- 放置 8xd.io 域名下的公开网页和小型应用
+- 管理图床、分享页、展示页这类轻量服务
+- 沉淀可以反复使用的 UI、配置、脚本和工具
+- 保存可以公开的 Skills、工作流和提示词模板
+- 让新项目有一个统一入口，而不是散落在不同仓库里
 
-## Current Modules / 当前模块
+## 现在包含什么
 
-| Path | Type | Description |
-| --- | --- | --- |
-| `apps/img-host` | Cloudflare Worker | Public image delivery backed by object storage. |
-| `apps/homepage` | App submodule | Public homepage module managed as an independent repository. |
-| `apps/share-pages` | App submodule | Public share-page module managed as an independent repository. |
-| `packages/ui` | Package | Shared interface components. |
-| `packages/config` | Package | Shared lint, TypeScript, and tool configuration. |
-| `packages/utils` | Package | Small shared utilities. |
-| `skills/` | Skills | Public skills, workflows, and prompt templates. |
+| 模块 | 用途 |
+| --- | --- |
+| `img-host` | 公开图床与图片展示页 |
+| `homepage` | 8xd.io 主站 |
+| `share-pages` | 公开分享页 |
+| `packages` | 可复用组件、配置和工具 |
+| `skills` | 可公开的技能、工作流和提示词模板 |
 
-## Dependencies / 依赖
+## 组织方式
 
-Minimum local tools:
+小模块会直接放在这里，方便快速迭代和统一维护。
 
-- Node.js `>=20`
-- npm with workspace support
-- Wrangler for Cloudflare Worker development and deployment
-- A Cloudflare account and an object storage bucket for modules that need them
+如果某个模块变得足够大，或者需要独立发布，它可以拆成独立仓库，再挂回这里。这样既不会把所有东西搅在一起，也不会失去总入口。
 
-常用本地工具：
+## 公开边界
 
-- Node.js `>=20`
-- 支持 workspace 的 npm
-- 用于 Cloudflare Worker 开发和部署的 Wrangler
-- 需要部署相关模块时，再配置 Cloudflare 账号与对象存储桶
+这个仓库是公开的，所以这里只放可以公开的内容。
 
-## Development / 开发
+不会提交：
 
-Install dependencies:
+- 密钥、Token、Cookie、私钥
+- 本机路径、个人环境信息
+- 私有服务地址
+- 私有模型地址或非公开模型源码
+- 真实部署配置
+
+## 维护
+
+主要依赖：
+
+- Node.js 20+
+- npm
+- Wrangler，仅用于需要部署边缘服务的模块
+
+常用检查：
 
 ```bash
 npm install
-```
-
-Clone submodules after a normal clone:
-
-```bash
-git submodule update --init --recursive
-```
-
-Run all available checks:
-
-```bash
 npm run check
 ```
 
-Run the image-host syntax check:
+## License
 
-```bash
-npm run img-host:check
-```
-
-## Module Strategy / 模块策略
-
-**中文**：小模块直接放在这个仓库中，方便统一维护、复用组件和共享配置。已经足够大、拥有独立发布节奏或历史提交的模块，可以保留独立仓库，再作为 submodule 挂到 `apps/` 或 `services/` 下。
-
-**English**: Small modules live directly in this monorepo for easier maintenance and reuse. Larger modules with their own release cadence or history can stay in separate repositories and be mounted as submodules under `apps/` or `services/`.
-
-## Security / 安全边界
-
-This is a public repository. Keep it safe by default:
-
-- Do not commit secrets, tokens, private keys, cookies, or credentials.
-- Do not commit local machine paths or personal environment details.
-- Do not commit private service URLs, private model endpoints, or proprietary model source code.
-- Use `*.example.*` files for deploy configuration templates.
-- Keep real deployment files such as `wrangler.jsonc`, `.dev.vars`, and `.env` files local.
-
-这是一个 public 仓库，默认按公开安全标准维护：
-
-- 不提交密钥、Token、私钥、Cookie 或凭证。
-- 不提交本机路径、个人环境信息。
-- 不提交私有服务 URL、私有模型端点或非公开模型源码。
-- 部署配置使用 `*.example.*` 模板。
-- 真实部署文件，例如 `wrangler.jsonc`、`.dev.vars`、`.env`，只保留在本地环境。
-
-## License / 许可证
-
-MIT License. See [LICENSE](./LICENSE).
+MIT
