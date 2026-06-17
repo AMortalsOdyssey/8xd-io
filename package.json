@@ -1,0 +1,24 @@
+{
+  "name": "8xd-io",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public monorepo for 8xd.io applications, services, packages, skills, and infrastructure templates.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/img-host",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "npm run check --workspaces --if-present",
+    "img-host:check": "npm --workspace @8xd/img-host run check",
+    "img-host:dry-run": "npm --workspace @8xd/img-host run deploy:dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "wrangler": "^4.101.0"
+  }
+}

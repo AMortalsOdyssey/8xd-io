@@ -1,0 +1,22 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "8xd-img-host",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-17",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "img.example.com/*",
+      "zone_name": "example.com"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "example-images"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

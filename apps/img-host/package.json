@@ -1,0 +1,13 @@
+{
+  "name": "@8xd/img-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker image host backed by object storage.",
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/index.js",
+    "dev": "wrangler dev --config wrangler.jsonc",
+    "deploy:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
+    "deploy": "wrangler deploy --config wrangler.jsonc"
+  }
+}

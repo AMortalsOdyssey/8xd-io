@@ -1,0 +1,6 @@
+[submodule "apps/share-pages"]
+	path = apps/share-pages
+	url = https://github.com/AMortalsOdyssey/share-pages-8xd-io.git
+[submodule "apps/homepage"]
+	path = apps/homepage
+	url = https://github.com/AMortalsOdyssey/8xd.io-homepage.git

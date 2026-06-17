@@ -1,0 +1,26 @@
+.DS_Store
+node_modules/
+npm-debug.log*
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+.dev.vars
+*.local
+
+# Cloudflare local/private state
+.wrangler/
+wrangler.jsonc
+!wrangler.example.jsonc
+
+# Build outputs
+dist/
+build/
+coverage/
+.turbo/
+.cache/
+
+# Editor state
+.idea/
+.vscode/
