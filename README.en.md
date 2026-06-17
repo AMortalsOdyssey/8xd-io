@@ -22,6 +22,7 @@
 <p align="center">
   <a href="https://8xd.io">Website</a>
   · <a href="https://img.8xd.io">Image Host</a>
+  · <a href="./apps/amo">AMO</a>
   · <a href="./apps">Apps</a>
   · <a href="./skills">Skills</a>
   · <a href="./README.md">中文</a>
@@ -52,6 +53,7 @@ It is intentionally lightweight. New ideas can start as something small and usab
 | [`img-host`](./apps/img-host) | Image hosting and image-host landing page |
 | [`homepage`](./apps/homepage) | The 8xd.io homepage |
 | [`share-pages`](./apps/share-pages) | Public share pages |
+| [`amo`](./apps/amo) | A Mortal's Odyssey interactive project |
 | [`packages`](./packages) | Reusable components, configs, and utilities |
 | [`skills`](./skills) | Public skills, workflows, and prompt templates |
 
@@ -90,4 +92,4 @@ npm run check
 
 ## License
 
-MIT
+The content owned directly by this repository uses MIT. Mounted submodules keep their own licenses.

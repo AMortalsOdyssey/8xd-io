@@ -22,6 +22,7 @@
 <p align="center">
   <a href="https://8xd.io">Website</a>
   · <a href="https://img.8xd.io">Image Host</a>
+  · <a href="./apps/amo">AMO</a>
   · <a href="./apps">Apps</a>
   · <a href="./skills">Skills</a>
   · <a href="./README.en.md">English</a>
@@ -52,6 +53,7 @@
 | [`img-host`](./apps/img-host) | 图床与图片展示页 |
 | [`homepage`](./apps/homepage) | 8xd.io 主站 |
 | [`share-pages`](./apps/share-pages) | 公开分享页 |
+| [`amo`](./apps/amo) | A Mortal's Odyssey 互动项目 |
 | [`packages`](./packages) | 可复用组件、配置和工具 |
 | [`skills`](./skills) | 可以公开的 Skills、工作流和提示词模板 |
 
@@ -90,4 +92,4 @@ npm run check
 
 ## License
 
-MIT
+本仓库自有内容使用 MIT。挂载进来的 submodule 项目以各自仓库的许可证为准。

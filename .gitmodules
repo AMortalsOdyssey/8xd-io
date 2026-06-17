@@ -4,3 +4,6 @@
 [submodule "apps/homepage"]
 	path = apps/homepage
 	url = https://github.com/AMortalsOdyssey/8xd.io-homepage.git
+[submodule "apps/amo"]
+	path = apps/amo
+	url = https://github.com/AMortalsOdyssey/AMO.git
