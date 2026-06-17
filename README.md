@@ -1,6 +1,10 @@
 <h1 align="center">8xd.io</h1>
 
 <p align="center">
+  <img src="./assets/readme/hero-banner.png" alt="8xd.io banner" width="100%">
+</p>
+
+<p align="center">
   <strong>一个给公开小工具、页面和创作能力生长的地方。</strong>
 </p>
 
@@ -25,10 +29,6 @@
 
 <p align="center">
   <strong>中文</strong> | <a href="./README.en.md">English</a>
-</p>
-
-<p align="center">
-  <img src="./assets/readme/hero-banner.png" alt="8xd.io banner" width="100%">
 </p>
 
 ## 这是什么
