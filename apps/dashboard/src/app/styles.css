@@ -975,7 +975,7 @@ button {
 }
 
 .lawyer-kpis {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--border-soft);
@@ -983,7 +983,7 @@ button {
 }
 
 .traffic-insights {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .traffic-insight,

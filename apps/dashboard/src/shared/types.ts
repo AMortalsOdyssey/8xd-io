@@ -69,6 +69,7 @@ export type BreakdownKind =
   | "path"
   | "referrer"
   | "agent"
+  | "aiAgent"
   | "host"
   | "source"
   | "event";

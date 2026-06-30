@@ -17,6 +17,7 @@
     "dashboard:check": "npm --workspace @8xd/dashboard run lint",
     "dashboard:deploy:dry": "npm --workspace @8xd/dashboard run deploy:dry",
     "dashboard:test": "npm --workspace @8xd/dashboard run test",
+    "dashboard:test:attribution": "npm --workspace @8xd/dashboard run test:attribution",
     "img-host:check": "npm --workspace @8xd/img-host run check",
     "img-host:dry-run": "npm --workspace @8xd/img-host run deploy:dry-run"
   },

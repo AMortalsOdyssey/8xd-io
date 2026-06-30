@@ -744,6 +744,10 @@ function LawyerHomepageView({
   const agentRequests = breakdowns
     .filter((row) => row.kind === "agent" && /Agent|爬虫|监控|AI|bot/i.test(row.label))
     .reduce((sum, row) => sum + row.value, 0);
+  const geoRequests = breakdowns
+    .filter((row) => row.kind === "source" && row.label.startsWith("GEO /"))
+    .reduce((sum, row) => sum + row.value, 0);
+  const topAiAgent = topBreakdowns(breakdowns, "aiAgent")[0];
 
   return (
     <div className="full-page lawyer-page">
@@ -763,6 +767,7 @@ function LawyerHomepageView({
         <MetricInline label="Cloudflare 访问" value={formatNumber(cloudflareViews)} status="pageViews" />
         <MetricInline label="站内埋点" value={instrumentedViews ? formatNumber(instrumentedViews) : "待采集"} status="pageview" />
         <MetricInline label="疑似 Agent" value={agentRequests ? formatNumber(agentRequests) : "待校准"} status="近似归因" />
+        <MetricInline label="AI / GEO" value={geoRequests ? formatNumber(geoRequests) : "待采集"} status={topAiAgent?.label || "User-Agent"} />
         <MetricInline label="流量大小" value={`${formatDecimal(domain?.bytesMiB || 0)} MiB`} status="近 30 天" />
       </div>
       <div className="traffic-insights">
@@ -779,6 +784,8 @@ function LawyerHomepageView({
         <BreakdownBarPanel title="请求页面 / 路径" rows={topBreakdowns(breakdowns, "path")} />
         <BreakdownBarPanel title="请求来源" rows={topBreakdowns(breakdowns, "referrer")} />
         <BreakdownBarPanel title="浏览器 / Agent" rows={topBreakdowns(breakdowns, "agent")} />
+        <BreakdownBarPanel title="AI / GEO 来源" rows={topBreakdowns(breakdowns, "aiAgent")} />
+        <BreakdownBarPanel title="SEO / GEO 分布" rows={topBreakdowns(breakdowns, "source")} />
       </div>
       <div className="two-up">
         <Panel title="数据可信度">
@@ -791,8 +798,8 @@ function LawyerHomepageView({
         <Panel title="采集状态">
           <div className="attribution-notes">
             <p>Cloudflare Zone 指标提供根域名请求、访问、威胁和流量大小，是当前主数据源。</p>
-            <p>律师主页新增的 pageview beacon 会从浏览器端补充路径、Referer、设备和会话，不记录原始 IP。</p>
-            <p>如果后续开启 Cloudflare Logpush 或 Bot Management，可以把 IP 属地、Bot score 和路径维度进一步做成真实明细。</p>
+            <p>Pageview beacon 是浏览器端页面浏览事件，用来补充路径、Referer、设备和会话；不记录原始 IP，也抓不到大多数不执行 JS 的 AI crawler。</p>
+            <p>AI / GEO 来源优先看 Cloudflare 边缘请求的 User-Agent 和 Referer，再用站内 pageview 校准真人路径；后续可接 Logpush 或 AI Crawl Control 做更细明细。</p>
           </div>
         </Panel>
       </div>

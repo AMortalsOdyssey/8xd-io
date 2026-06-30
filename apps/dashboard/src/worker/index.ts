@@ -5,6 +5,12 @@ import {
   type RawDashboardData,
   type TimeRange,
 } from "../shared/snapshot";
+import {
+  classifyTrafficIdentity,
+  confidenceLabel,
+  trafficBucketLabel,
+  type TrafficIdentity,
+} from "../shared/ai-attribution";
 import type { Connector, MetricRow, MetricSource, ResourceRecord, ScopeRef, TrafficBreakdown } from "../shared/types";
 
 const SESSION_COOKIE = "dashboard_session";
@@ -571,13 +577,15 @@ async function collectZoneTrafficBreakdowns(
   totalVisits: number,
   hostnames: string[],
 ): Promise<TrafficBreakdown[]> {
-  const [countries, hosts, paths, referers, devices] = await Promise.all([
+  const [countries, hosts, paths, referers, devices, userAgents] = await Promise.all([
     collectGraphqlBreakdown(env, zone, "country", "clientCountryName", "未知地区", "requests"),
     collectGraphqlBreakdown(env, zone, "host", "clientRequestHTTPHost", zone.name, "requests"),
     collectGraphqlBreakdown(env, zone, "path", "clientRequestPath", "/", "requests"),
     collectGraphqlBreakdown(env, zone, "referrer", "clientRequestReferer", "无 Referer", "requests"),
     collectGraphqlBreakdown(env, zone, "agent", "clientDeviceType", "未知设备", "requests"),
+    collectGraphqlBreakdown(env, zone, "aiAgent", "clientRequestUserAgent", "未知 User-Agent", "requests"),
   ]);
+  const identityRows = buildIdentityBreakdowns(zone.name, userAgents, referers, "Cloudflare User-Agent / Referer 维度");
 
   const rows = [
     ...countries,
@@ -585,6 +593,7 @@ async function collectZoneTrafficBreakdowns(
     ...paths,
     ...referers.map((row) => ({ ...row, label: simplifyReferrer(row.label) })),
     ...devices.map((row) => ({ ...row, label: deviceLabel(row.label) })),
+    ...identityRows,
   ];
 
   if (rows.length > 0) {
@@ -685,6 +694,17 @@ function estimateZoneBreakdowns(
   add(`ref-${domain}-social`, "referrer", "微信 / 社交预览", 0.1, "分享卡片抓取和 App 内浏览。");
   add(`ref-${domain}-agent`, "referrer", "Agent / 工具请求", 0.13, "AI Agent、监控、预览器、SEO 工具和脚本请求。");
   add(`ref-${domain}-other`, "referrer", "其它来源", 0.09, "剩余来源合并。");
+  add(`source-${domain}-geo-crawler`, "source", "GEO / AI Crawler", 0.08, "AI 训练或索引 crawler 的近似请求量，等待 Cloudflare User-Agent / AI Crawl Control 校准。");
+  add(`source-${domain}-geo-search`, "source", "GEO / AI Search", 0.03, "AI 搜索产品抓取与检索类请求的估算值。");
+  add(`source-${domain}-geo-assistant`, "source", "GEO / AI Assistant", 0.02, "用户在 AI 助手中触发网页读取时可能产生的请求。");
+  add(`source-${domain}-seo-bot`, "source", "SEO / Search Bot", 0.09, "传统搜索引擎 crawler 请求。");
+  add(`source-${domain}-seo-referral`, "source", "SEO / Search Referral", 0.12, "搜索结果点击带来的浏览器访问。");
+  add(`source-${domain}-human`, "source", "Human / Browser", 0.57, "浏览器访问与静态资源加载合并估算。");
+  add(`ai-${domain}-gptbot`, "aiAgent", "OpenAI / GPTBot", 0.025, "高置信：匹配 OpenAI 公开 User-Agent；当前为估算，等待真实 UA 采集。");
+  add(`ai-${domain}-chatgpt`, "aiAgent", "OpenAI / ChatGPT User", 0.012, "高置信：用户触发的 ChatGPT 网页读取会使用该类 UA；当前为估算。");
+  add(`ai-${domain}-claude`, "aiAgent", "Anthropic / ClaudeBot", 0.011, "高置信：匹配 Anthropic 公开 User-Agent；当前为估算。");
+  add(`ai-${domain}-perplexity`, "aiAgent", "Perplexity / PerplexityBot", 0.008, "高置信：匹配 Perplexity 公开 User-Agent；当前为估算。");
+  add(`ai-${domain}-bytespider`, "aiAgent", "ByteDance / Bytespider", 0.025, "中置信：可归为字节系抓取，不等同于确认豆包模型推理请求。");
   rows.push(
     breakdown(
       `agent-${domain}-browser`,
@@ -1072,7 +1092,7 @@ async function queryOptional<T>(db: D1Database, sql: string): Promise<T[]> {
 }
 
 async function loadPageEventBreakdowns(db: D1Database): Promise<TrafficBreakdown[]> {
-  const [countries, paths, referrers, devices, events] = await Promise.all([
+  const [countries, paths, referrers, devices, events, userAgents] = await Promise.all([
     queryOptional<Record<string, unknown>>(
       db,
       "SELECT CASE WHEN domain = 'www.fangliying.com' THEN 'fangliying.com' ELSE domain END AS scope_id, COALESCE(NULLIF(country, ''), '未知地区') AS label, COUNT(*) AS value FROM page_events WHERE created_at >= datetime('now', '-30 days') GROUP BY scope_id, label ORDER BY value DESC LIMIT 20",
@@ -1093,7 +1113,17 @@ async function loadPageEventBreakdowns(db: D1Database): Promise<TrafficBreakdown
       db,
       "SELECT CASE WHEN domain = 'www.fangliying.com' THEN 'fangliying.com' ELSE domain END AS scope_id, COALESCE(NULLIF(event_name, ''), 'pageview') AS label, COUNT(*) AS value FROM page_events WHERE created_at >= datetime('now', '-30 days') GROUP BY scope_id, label ORDER BY value DESC LIMIT 20",
     ),
+    queryOptional<Record<string, unknown>>(
+      db,
+      "SELECT CASE WHEN domain = 'www.fangliying.com' THEN 'fangliying.com' ELSE domain END AS scope_id, COALESCE(NULLIF(user_agent, ''), '未知 User-Agent') AS label, COUNT(*) AS value FROM page_events WHERE created_at >= datetime('now', '-30 days') GROUP BY scope_id, label ORDER BY value DESC LIMIT 20",
+    ),
   ]);
+  const identityRows = buildIdentityBreakdowns(
+    "fangliying.com",
+    mapEventRows(userAgents, "aiAgent", "events", false),
+    mapEventRows(referrers, "referrer", "events", false),
+    "律师主页 pageview beacon",
+  );
 
   return [
     ...mapEventRows(countries, "country", "events"),
@@ -1101,6 +1131,7 @@ async function loadPageEventBreakdowns(db: D1Database): Promise<TrafficBreakdown
     ...mapEventRows(referrers, "referrer", "events"),
     ...mapEventRows(devices, "agent", "events"),
     ...mapEventRows(events, "event", "views"),
+    ...identityRows,
   ];
 }
 
@@ -1108,10 +1139,12 @@ function mapEventRows(
   rows: Record<string, unknown>[],
   kind: TrafficBreakdown["kind"],
   unit: TrafficBreakdown["unit"],
+  simplify = true,
 ): TrafficBreakdown[] {
   return rows.map((row, index) => {
     const scopeId = String(row.scope_id || "fangliying.com");
-    const label = kind === "referrer" ? simplifyReferrer(String(row.label || "")) : String(row.label || "未知");
+    const rawLabel = String(row.label || "未知");
+    const label = simplify && kind === "referrer" ? simplifyReferrer(rawLabel) : rawLabel;
     return breakdown(
       `event-${kind}-${scopeId}-${index}-${slug(label)}`,
       "domain",
@@ -1124,6 +1157,68 @@ function mapEventRows(
       "来自律师主页浏览器端 pageview 埋点，不包含被拦截的脚本、关闭 JS 的访问或纯资源请求。",
     );
   });
+}
+
+function buildIdentityBreakdowns(
+  fallbackScopeId: string,
+  userAgentRows: TrafficBreakdown[],
+  referrerRows: TrafficBreakdown[],
+  sourceDetail: string,
+): TrafficBreakdown[] {
+  const byIdentity = new Map<string, TrafficBreakdown>();
+  const bySource = new Map<string, TrafficBreakdown>();
+
+  for (const row of userAgentRows) {
+    const identity = classifyTrafficIdentity({ userAgent: row.label });
+    addIdentitySource(bySource, row, identity, sourceDetail);
+    if (identity.category !== "browser" && identity.category !== "unknown") {
+      addIdentitySource(byIdentity, row, identity, sourceDetail, "aiAgent");
+    }
+  }
+
+  for (const row of referrerRows) {
+    const identity = classifyTrafficIdentity({ referrer: row.label });
+    if (identity.category === "unknown") continue;
+    addIdentitySource(bySource, row, identity, sourceDetail);
+    if (identity.isAi) {
+      addIdentitySource(byIdentity, row, identity, sourceDetail, "aiAgent");
+    }
+  }
+
+  if (byIdentity.size === 0 && bySource.size === 0 && fallbackScopeId) return [];
+  return [...byIdentity.values(), ...bySource.values()];
+}
+
+function addIdentitySource(
+  target: Map<string, TrafficBreakdown>,
+  row: TrafficBreakdown,
+  identity: TrafficIdentity,
+  sourceDetail: string,
+  kind: "aiAgent" | "source" = "source",
+): void {
+  const scopeId = row.scopeId || "fangliying.com";
+  const label = kind === "aiAgent" ? identity.label : trafficBucketLabel(identity);
+  const key = `${kind}:${scopeId}:${label}:${row.source}`;
+  const helper = `${identity.detail} ${confidenceLabel(identity)}；数据源：${sourceDetail}。`;
+  const existing = target.get(key);
+  if (existing) {
+    existing.value += row.value;
+    return;
+  }
+  target.set(
+    key,
+    breakdown(
+      `${kind}-${scopeId}-${row.source}-${slug(label)}`,
+      "domain",
+      scopeId,
+      kind,
+      label,
+      row.value,
+      row.unit,
+      row.source,
+      helper,
+    ),
+  );
 }
 
 function mergeBreakdowns(primary: TrafficBreakdown[], instrumented: TrafficBreakdown[]): TrafficBreakdown[] {
@@ -1239,7 +1334,11 @@ function deviceLabel(value: string): string {
 }
 
 function deviceFromUserAgent(userAgent: string): string {
-  if (/bot|crawler|spider|slurp|bingpreview|facebookexternalhit|whatsapp|telegrambot|bytespider|gptbot|claudebot|perplexity/i.test(userAgent)) {
+  const identity = classifyTrafficIdentity({ userAgent });
+  if (identity.category !== "browser" && identity.category !== "unknown") {
+    return identity.label;
+  }
+  if (/bot|crawler|spider|slurp|bingpreview|facebookexternalhit|whatsapp|telegrambot/i.test(userAgent)) {
     return "搜索/AI/监控 Agent";
   }
   if (/mobile|iphone|android/i.test(userAgent)) return "移动端浏览器";

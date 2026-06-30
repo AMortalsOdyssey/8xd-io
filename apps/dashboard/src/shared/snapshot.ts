@@ -306,6 +306,17 @@ export const seedData: RawDashboardData = {
     traffic("agent-browser", "domain", "fangliying.com", "agent", "浏览器页面访问", 4378, "requests", "estimated", "Cloudflare Web Analytics 的 pageViews 更接近真实浏览"),
     traffic("agent-static", "domain", "fangliying.com", "agent", "静态资源加载", 1180, "requests", "estimated", "一次页面访问通常会触发多个资源请求"),
     traffic("agent-bot", "domain", "fangliying.com", "agent", "搜索/AI/监控 Agent", 754, "requests", "estimated", "未开启 Bot Management 时按 UA/路径/Referer 近似归因"),
+    traffic("source-geo-crawler", "domain", "fangliying.com", "source", "GEO / AI Crawler", 510, "requests", "estimated", "AI 训练或索引 crawler 的近似请求量，等待 Cloudflare User-Agent / AI Crawl Control 校准"),
+    traffic("source-geo-search", "domain", "fangliying.com", "source", "GEO / AI Search", 190, "requests", "estimated", "AI 搜索产品抓取与检索类请求的估算值"),
+    traffic("source-geo-assistant", "domain", "fangliying.com", "source", "GEO / AI Assistant", 126, "requests", "estimated", "用户在 AI 助手中触发网页读取时可能产生的请求"),
+    traffic("source-seo-bot", "domain", "fangliying.com", "source", "SEO / Search Bot", 570, "requests", "estimated", "Google、Bing、百度等传统搜索引擎 crawler 请求"),
+    traffic("source-seo-referral", "domain", "fangliying.com", "source", "SEO / Search Referral", 760, "requests", "estimated", "搜索结果点击带来的浏览器访问"),
+    traffic("source-human", "domain", "fangliying.com", "source", "Human / Browser", 3602, "requests", "estimated", "浏览器访问与静态资源加载合并估算"),
+    traffic("ai-openai-gptbot", "domain", "fangliying.com", "aiAgent", "OpenAI / GPTBot", 160, "requests", "estimated", "高置信：匹配 OpenAI 公开 User-Agent；当前为估算，等待真实 UA 采集"),
+    traffic("ai-openai-chatgpt", "domain", "fangliying.com", "aiAgent", "OpenAI / ChatGPT User", 76, "requests", "estimated", "高置信：用户触发的 ChatGPT 网页读取会使用该类 UA；当前为估算"),
+    traffic("ai-claude", "domain", "fangliying.com", "aiAgent", "Anthropic / ClaudeBot", 70, "requests", "estimated", "高置信：匹配 Anthropic 公开 User-Agent；当前为估算"),
+    traffic("ai-perplexity", "domain", "fangliying.com", "aiAgent", "Perplexity / PerplexityBot", 50, "requests", "estimated", "高置信：匹配 Perplexity 公开 User-Agent；当前为估算"),
+    traffic("ai-bytespider", "domain", "fangliying.com", "aiAgent", "ByteDance / Bytespider", 158, "requests", "estimated", "中置信：可归为字节系抓取，不等同于确认豆包模型推理请求"),
   ],
   authProviders: defaultAuthProviders(false),
 };
@@ -495,10 +506,14 @@ function buildTrafficInsights(raw: RawDashboardData, scope: ScopeRef): TrafficIn
   const agentRequests = breakdowns
     .filter((row) => row.kind === "agent" && /Agent|bot|爬虫|监控|AI/i.test(row.label))
     .reduce((sum, row) => sum + row.value, 0);
+  const geoRequests = breakdowns
+    .filter((row) => row.kind === "source" && row.label.startsWith("GEO /"))
+    .reduce((sum, row) => sum + row.value, 0);
   const staticRequests = breakdowns
     .filter((row) => row.kind === "path" && /assets|_astro|静态/i.test(row.label))
     .reduce((sum, row) => sum + row.value, 0);
   const topReferrer = topBreakdown(breakdowns, "referrer");
+  const topAiAgent = topBreakdown(breakdowns, "aiAgent");
   const requests = domain?.requests ?? metricTotal(raw.metrics, "requests", "domain", scopeDomain);
   const visits = domain?.visits ?? metricTotal(raw.metrics, "visits", "domain", scopeDomain);
 
@@ -541,9 +556,18 @@ function buildTrafficInsights(raw: RawDashboardData, scope: ScopeRef): TrafficIn
     {
       id: "agent-share",
       title: "疑似非真人请求",
-      value: agentRequests > 0 ? `${formatInsightNumber(agentRequests)} 次` : "待继续采集",
+      value: agentRequests > 0 || geoRequests > 0 ? `${formatInsightNumber(Math.max(agentRequests, geoRequests))} 次` : "待继续采集",
       detail: "搜索爬虫、AI Agent、监控和社交卡片预览都会访问页面；未开启 Cloudflare Bot Management 时，Dashboard 用 UA、Referer、路径和来源字段做近似归因。",
-      tone: agentRequests > 0 ? "warning" : "muted",
+      tone: agentRequests > 0 || geoRequests > 0 ? "warning" : "muted",
+    },
+    {
+      id: "geo-ai-share",
+      title: "AI / GEO 来源",
+      value: geoRequests > 0 ? `${formatInsightNumber(geoRequests)} 次` : "等待 UA",
+      detail: topAiAgent
+        ? `当前最高识别为 ${topAiAgent.label}。${topAiAgent.helper || "真实度取决于 User-Agent、Referer 和 Cloudflare 分类字段。"}`
+        : "可识别 ChatGPT、Claude、Perplexity、Bytespider 等常见 AI/Agent UA；不会执行 JS 的 crawler 主要靠边缘请求维度。",
+      tone: geoRequests > 0 ? "success" : "muted",
     },
     {
       id: "static-share",
