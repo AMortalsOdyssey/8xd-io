@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "8xd-dashboard",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-14",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "dashboard.8xd.io",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "TURNSTILE_ENABLED": "true",
+    "TURNSTILE_SITE_KEY": "<cloudflare-turnstile-site-key>",
+    "ANALYTICS_ALLOWED_ORIGINS": "https://fangliying.com,https://www.fangliying.com",
+    "SUPABASE_URL": "",
+    "SUPABASE_PUBLISHABLE_KEY": "",
+    "DASHBOARD_ALLOWED_EMAILS": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "8xd_dashboard_metrics",
+      "database_id": "<cloudflare-d1-database-id>",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

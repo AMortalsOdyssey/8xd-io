@@ -1,0 +1,8 @@
+DASHBOARD_ADMIN_PASSWORD=change-me
+DASHBOARD_AUTH_SECRET=replace-with-a-long-random-secret
+CF_ACCOUNT_ID=your-cloudflare-account-id
+CF_API_TOKEN=your-cloudflare-api-token
+ANALYTICS_ALLOWED_ORIGINS=https://fangliying.com,https://www.fangliying.com,http://127.0.0.1:4321,http://localhost:4321
+SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+DASHBOARD_ALLOWED_EMAILS=

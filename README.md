@@ -50,6 +50,7 @@
 
 | 入口 | 用来做什么 |
 | --- | --- |
+| [`dashboard`](./apps/dashboard) | 私有云资源与域名流量 Dashboard |
 | [`img-host`](./apps/img-host) | 图床与图片展示页 |
 | [`homepage`](./apps/homepage) | 8xd.io 主站 |
 | [`share-pages`](./apps/share-pages) | 公开分享页 |
