@@ -446,13 +446,6 @@ function LoginScreen({
           ) : (
             <p>Supabase Free 可接邮箱免密和 Google 登录；当前生产环境未配置项目 URL / publishable key，所以先保留密码登录。</p>
           )}
-          <div className="auth-provider-list">
-            {authConfig.authProviders.map((provider) => (
-              <span className={`auth-chip ${provider.status}`} key={provider.provider} title={provider.detail}>
-                {provider.label} · {provider.costLabel}
-              </span>
-            ))}
-          </div>
         </div>
       </form>
     </div>

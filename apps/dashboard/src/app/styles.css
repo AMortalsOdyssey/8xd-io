@@ -1135,29 +1135,11 @@ button {
   gap: 5px;
 }
 
-.auth-provider-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.auth-chip {
-  border-radius: 999px;
-  background: #fff;
-  border: 1px solid var(--border);
-  padding: 5px 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.auth-chip.active,
-.auth-chip.available,
 .auth-provider-card.active,
 .auth-provider-card.available {
   border-color: #bbf7d0;
 }
 
-.auth-chip.blocked,
 .auth-provider-card.blocked {
   border-color: #fed7aa;
 }
