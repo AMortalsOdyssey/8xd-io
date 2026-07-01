@@ -265,9 +265,11 @@ function LoginScreen({
   const [busy, setBusy] = useState(false);
   const [authConfig, setAuthConfig] = useState<AuthConfig>(defaultAuthConfig);
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [checkingSupabaseSession, setCheckingSupabaseSession] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    let authenticatedBySupabase = false;
     getAuthConfig()
       .then(async (config) => {
         if (cancelled) return;
@@ -275,7 +277,10 @@ function LoginScreen({
         if (wasSupabaseManualLogout()) return;
         try {
           const exchanged = await exchangeExistingSupabaseSession(config);
-          if (exchanged && !cancelled) onAuthenticated();
+          if (exchanged && !cancelled) {
+            authenticatedBySupabase = true;
+            onAuthenticated();
+          }
         } catch (sessionError) {
           if (!cancelled) setError(sessionError instanceof Error ? sessionError.message : "Supabase 登录失败");
         }
@@ -283,6 +288,11 @@ function LoginScreen({
       .catch(() => {
         if (!cancelled) {
           setAuthConfig(defaultAuthConfig);
+        }
+      })
+      .finally(() => {
+        if (!cancelled && !authenticatedBySupabase) {
+          setCheckingSupabaseSession(false);
         }
       });
     return () => {
@@ -366,6 +376,10 @@ function LoginScreen({
     }
   }
 
+  if (checkingSupabaseSession) {
+    return <LoadingShell label="正在验证登录状态" />;
+  }
+
   return (
     <div className="login-screen">
       <form className="login-card" onSubmit={submit} autoComplete="on">
@@ -415,12 +429,12 @@ function LoginScreen({
         <button className="primary-button" disabled={busy}>
           {busy ? "登录中" : "进入 Dashboard"}
         </button>
-        <div className="auth-provider-panel">
-          <div className="auth-provider-title">
-            <KeyStatus enabled={authConfig.supabaseEnabled} />
-            <span>免密登录</span>
-          </div>
-          {authConfig.supabaseEnabled ? (
+        {authConfig.supabaseEnabled ? (
+          <div className="auth-provider-panel">
+            <div className="auth-provider-title">
+              <KeyStatus enabled={authConfig.supabaseEnabled} />
+              <span>免密登录</span>
+            </div>
             <div className="auth-actions">
               <button className="secondary-button" type="button" onClick={handleGoogleLogin} disabled={busy}>
                 <Users size={15} />
@@ -443,10 +457,8 @@ function LoginScreen({
                 发送登录链接
               </button>
             </div>
-          ) : (
-            <p>Supabase Free 可接邮箱免密和 Google 登录；当前生产环境未配置项目 URL / publishable key，所以先保留密码登录。</p>
-          )}
-        </div>
+          </div>
+        ) : null}
       </form>
     </div>
   );
@@ -456,11 +468,11 @@ function KeyStatus({ enabled }: { enabled: boolean }) {
   return enabled ? <CheckCircle2 size={16} /> : <Lock size={16} />;
 }
 
-function LoadingShell() {
+function LoadingShell({ label = "正在加载 Dashboard" }: { label?: string }) {
   return (
     <div className="loading-shell">
       <RefreshCw className="spin" size={22} />
-      <span>正在加载 Dashboard</span>
+      <span>{label}</span>
     </div>
   );
 }
