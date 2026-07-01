@@ -53,10 +53,16 @@ import {
   login,
   logout,
   sendSupabaseMagicLink,
+  signOutSupabase,
   signInWithSupabaseGoogle,
   syncCloudflare,
   type AuthConfig,
 } from "./api";
+import {
+  clearSupabaseManualLogout,
+  markSupabaseManualLogout,
+  wasSupabaseManualLogout,
+} from "./supabaseLogoutGuard";
 import type { DashboardSnapshot, TimeRange, TrendPoint } from "../shared/snapshot";
 import type { ConnectorCard, ResourceRecord, ScopeOption, ScopeRef, TrafficBreakdown } from "../shared/types";
 
@@ -176,12 +182,25 @@ export function App() {
 
   async function handleLogin(password: string, turnstileToken?: string) {
     await login(password, turnstileToken);
+    clearSupabaseManualLogout();
     setAuthenticated(true);
   }
 
   async function handleLogout() {
-    await logout();
-    setAuthenticated(false);
+    markSupabaseManualLogout();
+    try {
+      const config = await getAuthConfig();
+      await signOutSupabase(config);
+    } catch {
+      // The dashboard session still needs to be cleared even if Supabase is unavailable.
+    } finally {
+      try {
+        await logout();
+      } finally {
+        setSnapshot(null);
+        setAuthenticated(false);
+      }
+    }
   }
 
   async function handleSync() {
@@ -253,6 +272,7 @@ function LoginScreen({
       .then(async (config) => {
         if (cancelled) return;
         setAuthConfig(config);
+        if (wasSupabaseManualLogout()) return;
         try {
           const exchanged = await exchangeExistingSupabaseSession(config);
           if (exchanged && !cancelled) onAuthenticated();
@@ -319,6 +339,7 @@ function LoginScreen({
     setBusy(true);
     setError(null);
     try {
+      clearSupabaseManualLogout();
       await signInWithSupabaseGoogle(authConfig);
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Google 登录失败");
@@ -336,6 +357,7 @@ function LoginScreen({
     setNotice(null);
     try {
       await sendSupabaseMagicLink(authConfig, email);
+      clearSupabaseManualLogout();
       setNotice("登录链接已发送，请到邮箱中确认。");
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "邮箱登录链接发送失败");

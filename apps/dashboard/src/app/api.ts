@@ -123,6 +123,13 @@ export async function sendSupabaseMagicLink(config: AuthConfig, email: string): 
   if (error) throw error;
 }
 
+export async function signOutSupabase(config: AuthConfig): Promise<void> {
+  const client = await supabaseClient(config);
+  if (!client) return;
+  const { error } = await client.auth.signOut({ scope: "local" });
+  if (error) throw error;
+}
+
 export async function logout(): Promise<void> {
   if (localPreview) return;
   await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
