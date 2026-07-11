@@ -27,6 +27,26 @@ Dashboard 中的 `律师主页` 页签会分开展示：
 - 请求地区、路径、来源和 Agent 近似归因
 - 每条归因数据的来源标记：真实、站内埋点、估算或缓存
 
+## 资源同步与健康监控
+
+生产 Worker 每 15 分钟同步一次 Cloudflare 资源和指标。同步会读取 Workers Custom Domains，自动把 Worker、根域名和子域名关联到同一个项目，不再为单个 Worker 硬编码 hostname。
+
+`HEALTHCHECK_TARGETS` 使用 JSON 数组配置健康检查目标：
+
+```json
+[
+  {
+    "id": "jovlo",
+    "name": "Jovlo.ai",
+    "url": "https://jovlo.8xd.io/api/health",
+    "projectKey": "jovlo",
+    "domain": "8xd.io"
+  }
+]
+```
+
+每次检查会保存当前状态、HTTP 状态码和响应时间，并保留 30 天运行记录。失败时创建 Dashboard 告警，恢复后自动关闭对应告警。
+
 ## 登录方案
 
 当前生产默认使用管理员密码、HttpOnly Session Cookie 和 Cloudflare Turnstile。

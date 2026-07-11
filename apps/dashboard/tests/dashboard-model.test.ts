@@ -33,6 +33,17 @@ const resources: ResourceRecord[] = [
     shared: false,
   },
   {
+    id: "worker-jovlo-ai",
+    platform: "Cloudflare",
+    type: "worker",
+    name: "jovlo-ai",
+    status: "active",
+    projectKey: "jovlo",
+    domain: "8xd.io",
+    hostnames: ["jovlo.8xd.io"],
+    shared: false,
+  },
+  {
     id: "r2-share",
     platform: "Cloudflare",
     type: "r2",
@@ -98,6 +109,7 @@ describe("dashboard scope model", () => {
 
     expect(tree.global.id).toBe("global");
     expect(tree.projects.map((scope) => scope.id)).toEqual([
+      "jovlo",
       "lawyer-homepage",
       "share-pages",
       "shared",
@@ -107,6 +119,7 @@ describe("dashboard scope model", () => {
       "fangliying.com",
     ]);
     expect(tree.hostnames.map((scope) => scope.id)).toContain("dashboard.8xd.io");
+    expect(tree.hostnames.map((scope) => scope.id)).toContain("jovlo.8xd.io");
     expect(tree.resources.find((scope) => scope.id === "r2-share")?.badge).toBe(
       "共享资源",
     );

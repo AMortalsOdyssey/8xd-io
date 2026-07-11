@@ -11,6 +11,7 @@ import type {
 } from "./types";
 
 const PROJECT_LABELS: Record<string, string> = {
+  jovlo: "Jovlo.ai",
   "share-pages": "Share Pages",
   "lawyer-homepage": "律师主页",
   shared: "共享资源",

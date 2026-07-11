@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Activity,
   BarChart3,
   Bell,
   Box,
@@ -913,7 +914,7 @@ function WorkersPagesView({
                   {resource.hostnames.length ? resource.hostnames.join("、") : resource.domain || "未绑定"}
                 </span>
               </div>
-              <span className={resource.status === "active" ? "status success" : "status muted"}>
+              <span className={resourceStatusClass(resource.status)}>
                 {statusLabels[resource.status]}
               </span>
             </div>
@@ -1240,7 +1241,7 @@ function ResourceTable({
               <span>{resource.name}</span>
             </span>
             <span>{resourceTypeLabels[resource.type]}</span>
-            <span className={resource.status === "empty" ? "status muted" : "status success"}>
+            <span className={resourceStatusClass(resource.status)}>
               {statusLabels[resource.status]}
             </span>
             <span>{resource.domain || resource.projectKey}</span>
@@ -1448,12 +1449,19 @@ function StatusPill({ card }: { card?: ConnectorCard }) {
   return <span className={className}>{card.label}</span>;
 }
 
+function resourceStatusClass(status: ResourceRecord["status"]): string {
+  if (status === "active") return "status success";
+  if (status === "error") return "status danger";
+  return "status muted";
+}
+
 function resourceIcon(resource: ResourceRecord) {
   if (resource.type === "zone") return <Globe2 size={16} />;
   if (resource.type === "pages") return <Layers3 size={16} />;
   if (resource.type === "worker") return <Server size={16} />;
   if (resource.type === "r2") return <HardDrive size={16} />;
   if (resource.type === "kv") return <Database size={16} />;
+  if (resource.type === "connector") return <Activity size={16} />;
   return <Box size={16} />;
 }
 
@@ -1565,6 +1573,14 @@ function sourceColor(source: TrafficBreakdown["source"]): string {
 
 function usageForResource(resource: ResourceRecord, snapshot: DashboardSnapshot): string {
   if (resource.status === "empty") return "暂无资源";
+  if (resource.type === "connector" && resource.metadata?.url) {
+    const httpStatus = Number(resource.metadata.httpStatus || 0);
+    const responseMs = Number(resource.metadata.responseMs || 0);
+    const parts = [resource.status === "active" ? "正常" : "异常"];
+    if (httpStatus) parts.push(String(httpStatus));
+    if (responseMs) parts.push(`${responseMs} ms`);
+    return parts.join(" · ");
+  }
   if (resource.type === "zone") {
     const requests = metricForScope(snapshot, "requests", "domain", resource.domain || resource.name);
     const domain = snapshot.domains.find((item) => item.domain === resource.domain || item.domain === resource.name);

@@ -30,6 +30,21 @@ interface Env {
   SUPABASE_URL?: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
   DASHBOARD_ALLOWED_EMAILS?: string;
+  HEALTHCHECK_TARGETS?: string;
+}
+
+interface WorkerDomainBinding {
+  hostname: string;
+  service: string;
+  zone_name: string;
+}
+
+interface HealthcheckTarget {
+  id: string;
+  name: string;
+  url: string;
+  projectKey: string;
+  domain: string;
 }
 
 export default {
@@ -37,7 +52,7 @@ export default {
     return handleRequest(request, env, ctx);
   },
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(syncCloudflare(env));
+    ctx.waitUntil(runMonitoring(env));
   },
 };
 
@@ -115,8 +130,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   }
 
   if (url.pathname === "/api/sync/cloudflare" && request.method === "POST") {
-    ctx.waitUntil(syncCloudflare(env));
-    return json({ ok: true, message: "同步任务已启动" });
+    ctx.waitUntil(runMonitoring(env));
+    return json({ ok: true, message: "资源同步与健康检查已启动" });
   }
 
   const range = normalizeRange(url.searchParams.get("range"));
@@ -269,6 +284,10 @@ async function loadRawData(env: Env): Promise<RawDashboardData> {
     const connectors = await env.DB.prepare("SELECT * FROM connectors ORDER BY platform").all<Record<string, unknown>>();
     const domains = await env.DB.prepare("SELECT * FROM domains ORDER BY domain").all<Record<string, unknown>>();
     const alerts = await env.DB.prepare("SELECT * FROM alerts WHERE status = 'open' ORDER BY created_at DESC").all<Record<string, unknown>>();
+    const healthChecks = await queryOptional<Record<string, unknown>>(
+      env.DB,
+      "SELECT * FROM health_checks ORDER BY name",
+    );
     const trafficRows = await queryOptional<Record<string, unknown>>(
       env.DB,
       "SELECT * FROM traffic_breakdowns ORDER BY kind, value DESC",
@@ -287,8 +306,8 @@ async function loadRawData(env: Env): Promise<RawDashboardData> {
     return {
       generatedAt: new Date().toISOString(),
       sourceLabel: "真实数据",
-      resources: resources.results.map(mapResource),
-      metrics: metrics.results.map(mapMetric),
+      resources: [...resources.results.map(mapResource), ...healthChecks.map(mapHealthcheckResource)],
+      metrics: [...metrics.results.map(mapMetric), ...healthChecks.flatMap(mapHealthcheckMetrics)],
       connectors: connectors.results.map(mapConnector),
       trends: trends.results.length ? trends.results.map(mapTrend) : buildTrends(metrics.results.map(mapMetric)),
       domains: domains.results.map((row) => ({
@@ -321,6 +340,10 @@ async function loadRawData(env: Env): Promise<RawDashboardData> {
       authProviders: defaultAuthProviders(hasSupabaseConfig(env)),
     };
   }
+}
+
+async function runMonitoring(env: Env): Promise<void> {
+  await Promise.all([syncCloudflare(env), runHealthChecks(env)]);
 }
 
 async function syncCloudflare(env: Env): Promise<void> {
@@ -358,11 +381,75 @@ async function syncCloudflare(env: Env): Promise<void> {
   }
 }
 
+async function runHealthChecks(env: Env): Promise<void> {
+  if (!env.DB) return;
+
+  for (const target of parseHealthcheckTargets(env.HEALTHCHECK_TARGETS)) {
+    const startedAt = Date.now();
+    let status: "up" | "down" = "down";
+    let httpStatus = 0;
+    let errorMessage = "";
+
+    try {
+      const response = await fetch(target.url, {
+        headers: { "User-Agent": "8xd-dashboard-health/1.0" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      httpStatus = response.status;
+      const body = (await response.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
+      status = response.ok && body?.data?.ok !== false ? "up" : "down";
+      if (status === "down") errorMessage = `HTTP ${response.status}`;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : String(error);
+    }
+
+    const checkedAt = new Date().toISOString();
+    const responseMs = Date.now() - startedAt;
+    await env.DB.prepare(
+      "INSERT INTO health_checks (id, name, url, project_key, domain, status, http_status, response_ms, error, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, project_key = excluded.project_key, domain = excluded.domain, status = excluded.status, http_status = excluded.http_status, response_ms = excluded.response_ms, error = excluded.error, checked_at = excluded.checked_at",
+    ).bind(
+      target.id,
+      target.name,
+      target.url,
+      target.projectKey,
+      target.domain,
+      status,
+      httpStatus,
+      responseMs,
+      errorMessage,
+      checkedAt,
+    ).run();
+    await env.DB.prepare(
+      "INSERT INTO health_check_runs (id, target_id, status, http_status, response_ms, error, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(crypto.randomUUID(), target.id, status, httpStatus, responseMs, errorMessage, checkedAt).run();
+
+    const alertId = `health-check-${target.id}`;
+    if (status === "down") {
+      await env.DB.prepare(
+        "INSERT INTO alerts (id, title, description, severity, scope_type, scope_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?) ON CONFLICT(id) DO UPDATE SET description = excluded.description, severity = excluded.severity, status = 'open', created_at = excluded.created_at",
+      ).bind(
+        alertId,
+        `${target.name} 健康检查失败`,
+        `${target.url} · ${errorMessage || `HTTP ${httpStatus}`} · ${responseMs}ms`,
+        "critical",
+        "hostname",
+        new URL(target.url).hostname,
+        checkedAt,
+      ).run();
+    } else {
+      await env.DB.prepare("UPDATE alerts SET status = 'resolved' WHERE id = ?").bind(alertId).run();
+    }
+  }
+
+  await env.DB.prepare("DELETE FROM health_check_runs WHERE checked_at < datetime('now', '-30 days')").run();
+}
+
 async function collectCloudflare(env: Env): Promise<RawDashboardData> {
-  const [zones, pages, workers, d1, r2, kv, queues, vectorize] = await Promise.all([
+  const [zones, pages, workers, workerDomains, d1, r2, kv, queues, vectorize] = await Promise.all([
     cfRest<{ id: string; name: string; status: string; plan?: { name?: string } }[]>(env, "/zones", { per_page: "100" }),
     cfRest<Record<string, unknown>[]>(env, `/accounts/${env.CF_ACCOUNT_ID}/pages/projects`),
     cfRest<Record<string, unknown>[]>(env, `/accounts/${env.CF_ACCOUNT_ID}/workers/scripts`),
+    cfRest<WorkerDomainBinding[]>(env, `/accounts/${env.CF_ACCOUNT_ID}/workers/domains`),
     cfRest<Record<string, unknown>[]>(env, `/accounts/${env.CF_ACCOUNT_ID}/d1/database`),
     cfRest<{ buckets?: { name: string; creation_date?: string }[] }>(env, `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets`),
     cfRest<Record<string, unknown>[]>(env, `/accounts/${env.CF_ACCOUNT_ID}/storage/kv/namespaces`, { per_page: "100" }),
@@ -370,7 +457,7 @@ async function collectCloudflare(env: Env): Promise<RawDashboardData> {
     cfRest<Record<string, unknown>[]>(env, `/accounts/${env.CF_ACCOUNT_ID}/vectorize/v2/indexes`),
   ]);
 
-  const resources = normalizeResources({ zones, pages, workers, d1, r2, kv, queues, vectorize });
+  const resources = normalizeResources({ zones, pages, workers, workerDomains, d1, r2, kv, queues, vectorize });
   const domainMetrics = await collectDomainMetrics(env, zones, resources);
   const accountMetrics = await collectAccountMetrics(env);
 
@@ -555,15 +642,25 @@ async function collectAccountMetrics(env: Env): Promise<MetricRow[]> {
   }>(env, query, { accountTag: env.CF_ACCOUNT_ID, start, end });
 
   const account = data.viewer.accounts[0];
-  const workerRequests = account.workersOverviewRequestsAdaptiveGroups.reduce((sum, row) => sum + row.count, 0);
+  const workerRequestTotals = new Map<string, number>();
+  for (const row of account.workersOverviewRequestsAdaptiveGroups) {
+    const scriptName = row.dimensions.scriptName || "unknown";
+    workerRequestTotals.set(scriptName, (workerRequestTotals.get(scriptName) ?? 0) + row.count);
+  }
   const r2Storage = account.r2StorageAdaptiveGroups.reduce((max, row) => Math.max(max, row.max.payloadSize || 0), 0);
   const kvOps = account.kvOperationsAdaptiveGroups.reduce((sum, row) => sum + (row.sum.requests || 0), 0);
+  const workerMetrics = [...workerRequestTotals.entries()].flatMap(([scriptName, requests]) => {
+    const resourceId = workerResourceId(scriptName);
+    return [
+      metric("workerRequests", "Worker 请求", requests, "次", "resource", resourceId),
+      metric("requests", "请求数", requests, "次", "resource", resourceId),
+      metric("workerCpuMs", "CPU 时间", requests > 0 ? requests * 1.6 : 0, "ms", "resource", resourceId, "estimated"),
+      metric("workerWallMs", "总耗时", requests > 0 ? requests * 3.3 : 0, "ms", "resource", resourceId, "estimated"),
+    ];
+  });
 
   return [
-    metric("workerRequests", "Worker 请求", workerRequests, "次", "resource", "worker-share-pages"),
-    metric("requests", "请求数", workerRequests, "次", "resource", "worker-share-pages"),
-    metric("workerCpuMs", "CPU 时间", workerRequests > 0 ? workerRequests * 1.6 : 0, "ms", "resource", "worker-share-pages"),
-    metric("workerWallMs", "总耗时", workerRequests > 0 ? workerRequests * 3.3 : 0, "ms", "resource", "worker-share-pages"),
+    ...workerMetrics,
     metric("r2Storage", "R2 存储", Math.round((r2Storage / 1024 / 1024) * 10) / 10, "MiB", "resource", "r2-share-pages-content"),
     metric("r2Operations", "R2 操作", 0, "次", "resource", "r2-share-pages-content"),
     metric("kvOperations", "KV 操作", kvOps, "次", "resource", "kv-share-pages-config"),
@@ -785,10 +882,11 @@ function breakdown(
   };
 }
 
-function normalizeResources(input: {
+export function normalizeResources(input: {
   zones: { id: string; name: string; status: string }[];
   pages: Record<string, unknown>[];
   workers: Record<string, unknown>[];
+  workerDomains: WorkerDomainBinding[];
   d1: Record<string, unknown>[];
   r2: { buckets?: { name: string }[] };
   kv: Record<string, unknown>[];
@@ -826,15 +924,18 @@ function normalizeResources(input: {
   }
   for (const script of input.workers) {
     const name = String(script.id);
+    const domains = input.workerDomains.filter((item) => item.service === name);
+    const hostnames = domains.map((item) => item.hostname).sort();
+    const domain = domains[0]?.zone_name || (name.includes("share-pages") ? "8xd.io" : undefined);
     resources.push({
-      id: name.includes("share-pages") ? "worker-share-pages" : `worker-${name}`,
+      id: workerResourceId(name),
       platform: "Cloudflare",
       type: "worker",
       name,
       status: "active",
-      projectKey: name.includes("share-pages") ? "share-pages" : "uncategorized",
-      domain: name.includes("share-pages") ? "8xd.io" : undefined,
-      hostnames: name.includes("share-pages") ? ["share-pages.8xd.io"] : [],
+      projectKey: inferProject(hostnames[0] || name),
+      domain,
+      hostnames: hostnames.length ? hostnames : name.includes("share-pages") ? ["share-pages.8xd.io"] : [],
       shared: false,
     });
   }
@@ -1016,6 +1117,58 @@ function mapResource(row: Record<string, unknown>): ResourceRecord {
     metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
     lastSyncedAt: row.last_synced_at ? String(row.last_synced_at) : undefined,
   };
+}
+
+function mapHealthcheckResource(row: Record<string, unknown>): ResourceRecord {
+  const url = String(row.url);
+  return {
+    id: healthcheckResourceId(String(row.id)),
+    platform: "Cloudflare",
+    type: "connector",
+    name: `${String(row.name)} 健康检查`,
+    status: String(row.status) === "up" ? "active" : "error",
+    projectKey: String(row.project_key || "uncategorized"),
+    domain: String(row.domain || "") || undefined,
+    hostnames: [new URL(url).hostname],
+    shared: false,
+    metadata: {
+      url,
+      status: String(row.status),
+      httpStatus: Number(row.http_status || 0),
+      responseMs: Number(row.response_ms || 0),
+      error: String(row.error || ""),
+    },
+    lastSyncedAt: String(row.checked_at),
+  };
+}
+
+function mapHealthcheckMetrics(row: Record<string, unknown>): MetricRow[] {
+  const resourceId = healthcheckResourceId(String(row.id));
+  const date = String(row.checked_at || new Date().toISOString()).slice(0, 10);
+  return [
+    {
+      key: "availability",
+      label: "可用率",
+      value: String(row.status) === "up" ? 100 : 0,
+      unit: "%",
+      range: "24h",
+      date,
+      scopeType: "resource",
+      scopeId: resourceId,
+      source: "instrumented",
+    },
+    {
+      key: "responseMs",
+      label: "响应时间",
+      value: Number(row.response_ms || 0),
+      unit: "ms",
+      range: "24h",
+      date,
+      scopeType: "resource",
+      scopeId: resourceId,
+      source: "instrumented",
+    },
+  ];
 }
 
 function mapMetric(row: Record<string, unknown>): MetricRow {
@@ -1239,9 +1392,39 @@ function parseJson<T>(value: unknown, fallback: T): T {
 }
 
 function inferProject(value: string): string {
+  if (value.includes("jovlo")) return "jovlo";
   if (value.includes("fangliying")) return "lawyer-homepage";
   if (value.includes("8xd") || value.includes("share-pages")) return "share-pages";
   return "uncategorized";
+}
+
+function workerResourceId(name: string): string {
+  return name.includes("share-pages") ? "worker-share-pages" : `worker-${name}`;
+}
+
+function healthcheckResourceId(id: string): string {
+  return `healthcheck-${id}`;
+}
+
+export function parseHealthcheckTargets(value: string | undefined): HealthcheckTarget[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const target = item as Record<string, unknown>;
+      const id = String(target.id || "").trim();
+      const name = String(target.name || "").trim();
+      const url = String(target.url || "").trim();
+      const projectKey = String(target.projectKey || "").trim();
+      const domain = String(target.domain || "").trim();
+      if (!/^[a-z0-9-]{1,80}$/.test(id) || !name || !projectKey || !domain) return [];
+      if (!url.startsWith("https://")) return [];
+      return [{ id, name, url, projectKey, domain }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 function analyticsCors(request: Request, env: Env): { allowed: boolean; headers: HeadersInit } {

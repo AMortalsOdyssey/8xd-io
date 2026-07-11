@@ -19,6 +19,9 @@
   "observability": {
     "enabled": true
   },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "vars": {
     "ENVIRONMENT": "production",
     "TURNSTILE_ENABLED": "true",
@@ -26,7 +29,8 @@
     "ANALYTICS_ALLOWED_ORIGINS": "https://fangliying.com,https://www.fangliying.com",
     "SUPABASE_URL": "",
     "SUPABASE_PUBLISHABLE_KEY": "",
-    "DASHBOARD_ALLOWED_EMAILS": ""
+    "DASHBOARD_ALLOWED_EMAILS": "",
+    "HEALTHCHECK_TARGETS": "[{\"id\":\"jovlo\",\"name\":\"Jovlo.ai\",\"url\":\"https://jovlo.8xd.io/api/health\",\"projectKey\":\"jovlo\",\"domain\":\"8xd.io\"}]"
   },
   "d1_databases": [
     {
