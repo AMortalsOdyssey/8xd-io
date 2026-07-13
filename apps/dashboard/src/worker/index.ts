@@ -675,12 +675,13 @@ async function collectZoneTrafficBreakdowns(
   hostnames: string[],
 ): Promise<TrafficBreakdown[]> {
   const [countries, hosts, paths, referers, devices, userAgents] = await Promise.all([
-    collectGraphqlBreakdown(env, zone, "country", "clientCountryName", "未知地区", "requests"),
-    collectGraphqlBreakdown(env, zone, "host", "clientRequestHTTPHost", zone.name, "requests"),
-    collectGraphqlBreakdown(env, zone, "path", "clientRequestPath", "/", "requests"),
-    collectGraphqlBreakdown(env, zone, "referrer", "clientRequestReferer", "无 Referer", "requests"),
-    collectGraphqlBreakdown(env, zone, "agent", "clientDeviceType", "未知设备", "requests"),
-    collectGraphqlBreakdown(env, zone, "aiAgent", "clientRequestUserAgent", "未知 User-Agent", "requests"),
+    collectGraphqlBreakdown(env, zone, "country", "clientCountryName", "未知地区", "requests", 10),
+    collectGraphqlBreakdown(env, zone, "host", "clientRequestHTTPHost", zone.name, "requests", 10),
+    collectGraphqlBreakdown(env, zone, "path", "clientRequestPath", "/", "requests", 12),
+    // Referer 和 User-Agent 采样加深：AI crawler 的量通常进不了 top8，浅采样会导致归因覆盖率极低。
+    collectGraphqlBreakdown(env, zone, "referrer", "clientRequestReferer", "无 Referer", "requests", 24),
+    collectGraphqlBreakdown(env, zone, "agent", "clientDeviceType", "未知设备", "requests", 8),
+    collectGraphqlBreakdown(env, zone, "aiAgent", "clientRequestUserAgent", "未知 User-Agent", "requests", 40),
   ]);
   const identityRows = buildIdentityBreakdowns(zone.name, userAgents, referers, "Cloudflare User-Agent / Referer 维度");
 
@@ -720,12 +721,13 @@ async function collectGraphqlBreakdown(
   dimensionField: string,
   fallbackLabel: string,
   unit: TrafficBreakdown["unit"],
+  limit = 8,
 ): Promise<TrafficBreakdown[]> {
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const until = new Date().toISOString();
   const query = `query ZoneBreakdown($zoneTag: string!, $since: Time!, $until: Time!) {
     viewer { zones(filter: { zoneTag: $zoneTag }) {
-      httpRequestsAdaptiveGroups(limit: 8, filter: { datetime_geq: $since, datetime_leq: $until }, orderBy: [count_DESC]) {
+      httpRequestsAdaptiveGroups(limit: ${limit}, filter: { datetime_geq: $since, datetime_leq: $until }, orderBy: [count_DESC]) {
         count
         dimensions { ${dimensionField} }
       }
@@ -791,17 +793,8 @@ function estimateZoneBreakdowns(
   add(`ref-${domain}-social`, "referrer", "微信 / 社交预览", 0.1, "分享卡片抓取和 App 内浏览。");
   add(`ref-${domain}-agent`, "referrer", "Agent / 工具请求", 0.13, "AI Agent、监控、预览器、SEO 工具和脚本请求。");
   add(`ref-${domain}-other`, "referrer", "其它来源", 0.09, "剩余来源合并。");
-  add(`source-${domain}-geo-crawler`, "source", "GEO / AI Crawler", 0.08, "AI 训练或索引 crawler 的近似请求量，等待 Cloudflare User-Agent / AI Crawl Control 校准。");
-  add(`source-${domain}-geo-search`, "source", "GEO / AI Search", 0.03, "AI 搜索产品抓取与检索类请求的估算值。");
-  add(`source-${domain}-geo-assistant`, "source", "GEO / AI Assistant", 0.02, "用户在 AI 助手中触发网页读取时可能产生的请求。");
-  add(`source-${domain}-seo-bot`, "source", "SEO / Search Bot", 0.09, "传统搜索引擎 crawler 请求。");
-  add(`source-${domain}-seo-referral`, "source", "SEO / Search Referral", 0.12, "搜索结果点击带来的浏览器访问。");
-  add(`source-${domain}-human`, "source", "Human / Browser", 0.57, "浏览器访问与静态资源加载合并估算。");
-  add(`ai-${domain}-gptbot`, "aiAgent", "OpenAI / GPTBot", 0.025, "高置信：匹配 OpenAI 公开 User-Agent；当前为估算，等待真实 UA 采集。");
-  add(`ai-${domain}-chatgpt`, "aiAgent", "OpenAI / ChatGPT User", 0.012, "高置信：用户触发的 ChatGPT 网页读取会使用该类 UA；当前为估算。");
-  add(`ai-${domain}-claude`, "aiAgent", "Anthropic / ClaudeBot", 0.011, "高置信：匹配 Anthropic 公开 User-Agent；当前为估算。");
-  add(`ai-${domain}-perplexity`, "aiAgent", "Perplexity / PerplexityBot", 0.008, "高置信：匹配 Perplexity 公开 User-Agent；当前为估算。");
-  add(`ai-${domain}-bytespider`, "aiAgent", "ByteDance / Bytespider", 0.025, "中置信：可归为字节系抓取，不等同于确认豆包模型推理请求。");
+  // 注意：这里不再生成 aiAgent / source 维度的估算行。AI 厂商归因只基于真实
+  // User-Agent / Referer 采样，拿不到明细时对应面板显示"等待采集"，不编造比例。
   rows.push(
     breakdown(
       `agent-${domain}-browser`,

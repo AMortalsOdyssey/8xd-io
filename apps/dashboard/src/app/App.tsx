@@ -646,6 +646,26 @@ function Topbar({
   );
 }
 
+/** 有专属监控页的站点：跳转这些域名/子域名时直接进对应页面 */
+const siteNavByScopeId: Record<string, NavKey> = {
+  "fangliying.com": "lawyer",
+  "www.fangliying.com": "lawyer",
+  "jovlo.8xd.io": "jovlo",
+};
+
+/** 「查看详情」的正确落点：zone 的指标挂在 domain scope 下，健康检查跳它监控的子域名 */
+function scopeForResource(resource: ResourceRecord): ScopeRef {
+  if (resource.type === "zone") return { type: "domain", id: resource.domain || resource.name };
+  if (resource.type === "connector" && resource.hostnames.length) {
+    return { type: "hostname", id: resource.hostnames[0] };
+  }
+  return { type: "resource", id: resource.id };
+}
+
+function scopesEqual(left: ScopeRef, right: ScopeRef): boolean {
+  return left.type === right.type && left.id === right.id;
+}
+
 function PageContent({
   nav,
   snapshot,
@@ -659,7 +679,15 @@ function PageContent({
   range: TimeRange;
   onNavigate: (partial: Partial<RouteState>) => void;
 }) {
-  const openScopeDashboard = (nextScope: ScopeRef) => onNavigate({ nav: "overview", scope: nextScope });
+  const openScopeDashboard = (nextScope: ScopeRef) => {
+    const siteNav =
+      nextScope.type === "domain" || nextScope.type === "hostname" ? siteNavByScopeId[nextScope.id] : undefined;
+    if (siteNav) {
+      onNavigate({ nav: siteNav });
+      return;
+    }
+    onNavigate({ nav: "overview", scope: nextScope });
+  };
 
   if (nav === "cloudflare") return <CloudflareView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
   if (nav === "lawyer") return <LawyerHomepageView snapshot={snapshot} />;
@@ -765,7 +793,7 @@ function CloudflareView({
       </div>
       <div className="two-up">
         <TrendCard title="Cloudflare 请求趋势" trends={snapshot.trends} compact />
-        <OriginPanel snapshot={snapshot} />
+        <OriginPanel snapshot={snapshot} onOpenScope={onOpenScope} />
       </div>
       <CloudflareMetrics snapshot={snapshot} />
       <ResourceTable
@@ -902,7 +930,8 @@ function LawyerHomepageView({ snapshot }: { snapshot: DashboardSnapshot }) {
         <BreakdownBarPanel title="AI / GEO 来源" rows={topBreakdowns(breakdowns, "aiAgent")} />
         <BreakdownBarPanel title="SEO / GEO 分布" rows={topBreakdowns(breakdowns, "source")} />
       </div>
-      <div className="two-up">
+      <div className="analytics-grid">
+        <TrafficCompositionPanel rows={breakdowns} />
         <Panel title="数据可信度">
           <div className="source-quality-grid">
             {sourceQualityRows(breakdowns).map((row) => (
@@ -914,7 +943,7 @@ function LawyerHomepageView({ snapshot }: { snapshot: DashboardSnapshot }) {
           <div className="attribution-notes">
             <p>Cloudflare Zone 指标提供根域名请求、访问、威胁和流量大小，是当前主数据源。</p>
             <p>Pageview beacon 是浏览器端页面浏览事件，用来补充路径、Referer、设备和会话；不记录原始 IP，也抓不到大多数不执行 JS 的 AI crawler。</p>
-            <p>AI / GEO 来源优先看 Cloudflare 边缘请求的 User-Agent 和 Referer，再用站内 pageview 校准真人路径；后续可接 Logpush 或 AI Crawl Control 做更细明细。</p>
+            <p>AI / GEO 来源基于 Cloudflare 边缘请求 Top 40 User-Agent 与 Top 24 Referer 的真实采样归因，不足以覆盖的长尾会落入"未知"，不再用估算比例填充；后续可接 Logpush 或 AI Crawl Control 做全量明细。</p>
           </div>
         </Panel>
       </div>
@@ -985,6 +1014,66 @@ function JovloView({ snapshot, range }: { snapshot: DashboardSnapshot; range: Ti
         健康检查与 Worker 请求为真实数据；子域名请求 / 访问为按根域名均分的估算值，待接入 host 维度明细后替换。
       </div>
     </div>
+  );
+}
+
+const compositionMeta: Record<string, { label: string; color: string }> = {
+  Human: { label: "人类 / 浏览器", color: "#2563eb" },
+  GEO: { label: "AI Agent / GEO", color: "#f97316" },
+  SEO: { label: "搜索引擎 / SEO", color: "#16a34a" },
+  Social: { label: "社交预览", color: "#0891b2" },
+  Monitoring: { label: "监控 / 脚本", color: "#64748b" },
+  Other: { label: "未知 / 其它", color: "#94a3b8" },
+};
+
+function TrafficCompositionPanel({ rows }: { rows: TrafficBreakdown[] }) {
+  const sourceRows = rows.filter((row) => row.kind === "source");
+  const totals = sourceRows.reduce<Record<string, number>>((acc, row) => {
+    const bucket = row.label.split(" / ")[0];
+    const key = compositionMeta[bucket] ? bucket : "Other";
+    acc[key] = (acc[key] || 0) + row.value;
+    return acc;
+  }, {});
+  const total = Object.values(totals).reduce((sum, value) => sum + value, 0);
+  const entries = Object.keys(compositionMeta)
+    .filter((key) => totals[key])
+    .map((key) => ({ key, ...compositionMeta[key], value: totals[key] }));
+
+  return (
+    <Panel title="人 / Agent 流量构成">
+      {total > 0 ? (
+        <div className="composition">
+          <div className="composition-bar" role="img" aria-label="流量构成比例">
+            {entries.map((entry) => (
+              <i
+                key={entry.key}
+                style={{ width: `${(entry.value / total) * 100}%`, background: entry.color }}
+                title={`${entry.label} ${Math.round((entry.value / total) * 100)}%`}
+              />
+            ))}
+          </div>
+          <div className="composition-list">
+            {entries.map((entry) => (
+              <div className="composition-row" key={entry.key}>
+                <i style={{ background: entry.color }} />
+                <span>{entry.label}</span>
+                <strong>{formatNumber(entry.value)}</strong>
+                <em>{((entry.value / total) * 100).toFixed(1)}%</em>
+              </div>
+            ))}
+          </div>
+          <p className="muted composition-note">
+            比例基于已归因的 User-Agent / Referer 采样，覆盖不到的长尾流量计入"未知 / 其它"。
+          </p>
+        </div>
+      ) : (
+        <div className="empty-state">
+          <BarChart3 size={28} />
+          <strong>等待采集</strong>
+          <span>同步拿到真实 User-Agent / Referer 明细后展示，不使用估算比例。</span>
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -1416,24 +1505,34 @@ function ResourceTable({
           <span>近 30 天用量</span>
           <span>操作</span>
         </div>
-        {snapshot.resources.map((resource) => (
-          <div className="table-row" key={resource.id}>
-            <span className="resource-name">
-              {resourceIcon(resource)}
-              <span className="cell-ellipsis">{resource.name}</span>
-            </span>
-            <span className="cell-ellipsis">{resourceTypeLabels[resource.type]}</span>
-            <span className={resourceStatusClass(resource.status)}>
-              {statusLabels[resource.status]}
-            </span>
-            <span className="cell-ellipsis">{resource.domain || resource.projectKey}</span>
-            <span className="cell-ellipsis">{usageForResource(resource, snapshot)}</span>
-            <button className="text-button" onClick={() => onOpenScope({ type: "resource", id: resource.id })}>
-              查看详情
-              <ChevronRight size={15} />
-            </button>
-          </div>
-        ))}
+        {snapshot.resources.map((resource) => {
+          const target = scopeForResource(resource);
+          const isCurrent = scopesEqual(snapshot.activeScope, target);
+          return (
+            <div className="table-row" key={resource.id}>
+              <span className="resource-name">
+                {resourceIcon(resource)}
+                <span className="cell-ellipsis">{resource.name}</span>
+              </span>
+              <span className="cell-ellipsis">{resourceTypeLabels[resource.type]}</span>
+              <span className={resourceStatusClass(resource.status)}>
+                {statusLabels[resource.status]}
+              </span>
+              <span className="cell-ellipsis">{resource.domain || resource.projectKey}</span>
+              <span className="cell-ellipsis">{usageForResource(resource, snapshot)}</span>
+              {isCurrent ? (
+                <span className="text-button current" aria-disabled="true">
+                  当前查看中
+                </span>
+              ) : (
+                <button className="text-button" onClick={() => onOpenScope(target)}>
+                  查看详情
+                  <ChevronRight size={15} />
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </Panel>
   );
@@ -1505,7 +1604,13 @@ function UsagePanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   );
 }
 
-function OriginPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
+function OriginPanel({
+  snapshot,
+  onOpenScope,
+}: {
+  snapshot: DashboardSnapshot;
+  onOpenScope: (scope: ScopeRef) => void;
+}) {
   return (
     <Panel title="子域名流量">
       <div className="table compact-table">
@@ -1516,7 +1621,10 @@ function OriginPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
         </div>
         {snapshot.scopes.hostnames.slice(0, 6).map((hostname) => (
           <div className="table-row" key={hostname.id}>
-            <span className="cell-ellipsis">{hostname.label}</span>
+            <button className="text-button" onClick={() => onOpenScope({ type: "hostname", id: hostname.id })}>
+              <span className="cell-ellipsis">{hostname.label}</span>
+              <ChevronRight size={14} />
+            </button>
             <span>{formatNumber(metricForScope(snapshot, "requests", "hostname", hostname.id))}</span>
             <span>{formatNumber(metricForScope(snapshot, "visits", "hostname", hostname.id))}</span>
           </div>

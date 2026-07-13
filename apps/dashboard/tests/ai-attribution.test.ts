@@ -86,4 +86,64 @@ describe("AI and agent traffic attribution", () => {
     expect(identity.confidence).toBe("low");
     expect(trafficBucketLabel(identity)).toBe("Other / Unknown");
   });
+
+  it("classifies newer AI vendor crawlers and fetchers", () => {
+    const cases = [
+      { ua: "meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)", label: "Meta / ExternalAgent", bucket: "GEO / AI Crawler" },
+      { ua: "meta-externalfetcher/1.1", label: "Meta / ExternalFetcher", bucket: "GEO / AI Assistant" },
+      { ua: "Mozilla/5.0 (compatible; Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot)", label: "Amazon / Amazonbot", bucket: "GEO / AI Crawler" },
+      { ua: "CCBot/2.0 (https://commoncrawl.org/faq/)", label: "Common Crawl / CCBot", bucket: "GEO / AI Crawler" },
+      { ua: "Mozilla/5.0 (compatible; DuckAssistBot/1.0; +http://duckduckgo.com/duckassistbot.html)", label: "DuckDuckGo / DuckAssist", bucket: "GEO / AI Search" },
+      { ua: "MistralAI-User/1.0", label: "Mistral / Le Chat User", bucket: "GEO / AI Assistant" },
+      { ua: "Mozilla/5.0 (compatible; GoogleOther)", label: "Google / GoogleOther", bucket: "GEO / AI Crawler" },
+    ];
+    for (const item of cases) {
+      const identity = classifyTrafficIdentity({ userAgent: item.ua });
+      expect(identity.label).toBe(item.label);
+      expect(identity.isAi).toBe(true);
+      expect(trafficBucketLabel(identity)).toBe(item.bucket);
+    }
+  });
+
+  it("splits Applebot search traffic from Applebot-Extended AI training", () => {
+    const search = classifyTrafficIdentity({
+      userAgent: "Mozilla/5.0 (compatible; Applebot/0.1; +http://www.apple.com/go/applebot)",
+    });
+    const training = classifyTrafficIdentity({ userAgent: "Applebot-Extended/1.0" });
+
+    expect(search.isAi).toBe(false);
+    expect(trafficBucketLabel(search)).toBe("SEO / Search Bot");
+    expect(training.isAi).toBe(true);
+    expect(trafficBucketLabel(training)).toBe("GEO / AI Crawler");
+  });
+
+  it("separates scripts and headless browsers from human traffic", () => {
+    const script = classifyTrafficIdentity({ userAgent: "python-requests/2.32.0" });
+    const headless = classifyTrafficIdentity({
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 HeadlessChrome/126.0 Safari/537.36",
+    });
+
+    expect(script.label).toBe("Script / HTTP Client");
+    expect(script.isBot).toBe(true);
+    expect(trafficBucketLabel(script)).toBe("Monitoring / Script");
+    expect(headless.label).toBe("Automation / Headless Browser");
+    expect(headless.isBot).toBe(true);
+  });
+
+  it("classifies domestic AI product referrals", () => {
+    const cases = [
+      { referrer: "https://chat.deepseek.com/", label: "DeepSeek / Referral" },
+      { referrer: "https://tongyi.aliyun.com/qianwen", label: "Alibaba / 通义 Referral" },
+      { referrer: "https://yiyan.baidu.com/", label: "Baidu / 文心 Referral" },
+      { referrer: "https://www.doubao.com/chat/", label: "ByteDance / Doubao Referral" },
+      { referrer: "https://metaso.cn/search/xxx", label: "Metaso / 秘塔 Referral" },
+      { referrer: "https://copilot.microsoft.com/", label: "Microsoft / Copilot Referral" },
+    ];
+    for (const item of cases) {
+      const identity = classifyTrafficIdentity({ referrer: item.referrer });
+      expect(identity.label).toBe(item.label);
+      expect(identity.isAi).toBe(true);
+      expect(trafficBucketLabel(identity)).toBe("GEO / AI Referral");
+    }
+  });
 });

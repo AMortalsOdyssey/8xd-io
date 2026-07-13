@@ -371,6 +371,74 @@ button {
   background: var(--primary-soft);
 }
 
+.text-button.current {
+  color: var(--muted);
+  cursor: default;
+}
+
+.text-button .cell-ellipsis {
+  max-width: 160px;
+}
+
+/* ---------- Traffic composition ---------- */
+
+.composition {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.composition-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--soft-strong);
+}
+
+.composition-bar i {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+.composition-list {
+  display: grid;
+  gap: 6px;
+}
+
+.composition-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto 52px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.composition-row i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.composition-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #334155;
+}
+
+.composition-row em {
+  font-style: normal;
+  color: var(--muted);
+  text-align: right;
+}
+
+.composition-note {
+  margin: 0;
+}
+
 .sync-pill {
   display: inline-flex;
   align-items: center;
