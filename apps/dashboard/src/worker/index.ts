@@ -1336,7 +1336,8 @@ function buildIdentityBreakdowns(
   for (const row of userAgentRows) {
     const identity = classifyTrafficIdentity({ userAgent: row.label });
     addIdentitySource(bySource, row, identity, sourceDetail);
-    if (identity.category !== "browser" && identity.category !== "unknown") {
+    // aiAgent 面板只收 AI 身份；脚本/监控/搜索爬虫留在 source 构成里。
+    if (identity.isAi) {
       addIdentitySource(byIdentity, row, identity, sourceDetail, "aiAgent");
     }
   }
