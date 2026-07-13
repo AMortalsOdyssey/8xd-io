@@ -570,29 +570,16 @@ async function collectDomainMetrics(
     metrics.push(metric("visits", "访问量", total.pageViews, "次", "domain", zone.name));
     metrics.push(metric("threats", "威胁数", total.threats, "次", "domain", zone.name));
     const hostnames = hostnamesForDomain(zone.name, resources);
+    // 免费计划的 host 维度明细只支持 ≤24h 窗口：用近 24h 的真实 host 分布
+    // 把 30 天根域名总量按比例外推到各子域名，比无脑均分可信得多。
+    const hostDistribution = await collectHostDistribution(env, zone);
+    const distributionTotal = [...hostDistribution.values()].reduce((sum, count) => sum + count, 0);
     for (const hostname of hostnames) {
-      metrics.push(
-        metric(
-          "requests",
-          "请求数",
-          Math.round(total.requests / Math.max(hostnames.length, 1)),
-          "次",
-          "hostname",
-          hostname,
-          "estimated",
-        ),
-      );
-      metrics.push(
-        metric(
-          "visits",
-          "访问量",
-          Math.round(total.pageViews / Math.max(hostnames.length, 1)),
-          "次",
-          "hostname",
-          hostname,
-          "estimated",
-        ),
-      );
+      const share = distributionTotal > 0
+        ? (hostDistribution.get(hostname) ?? 0) / distributionTotal
+        : 1 / Math.max(hostnames.length, 1);
+      metrics.push(metric("requests", "请求数", Math.round(total.requests * share), "次", "hostname", hostname, "estimated"));
+      metrics.push(metric("visits", "访问量", Math.round(total.pageViews * share), "次", "hostname", hostname, "estimated"));
     }
     domains.push({
       domain: zone.name,
@@ -674,22 +661,21 @@ async function collectZoneTrafficBreakdowns(
   totalVisits: number,
   hostnames: string[],
 ): Promise<TrafficBreakdown[]> {
-  const [countries, hosts, paths, referers, devices, userAgents] = await Promise.all([
+  // 免费计划限制：httpRequestsAdaptiveGroups 明细查询窗口 ≤24h，
+  // clientRequestReferer 维度无权限（Referer 归因改由浏览器埋点承担）。
+  const [countries, hosts, paths, devices, userAgents] = await Promise.all([
     collectGraphqlBreakdown(env, zone, "country", "clientCountryName", "未知地区", "requests", 10),
-    collectGraphqlBreakdown(env, zone, "host", "clientRequestHTTPHost", zone.name, "requests", 10),
+    collectGraphqlBreakdown(env, zone, "host", "clientRequestHTTPHost", zone.name, "requests", 12),
     collectGraphqlBreakdown(env, zone, "path", "clientRequestPath", "/", "requests", 12),
-    // Referer 和 User-Agent 采样加深：AI crawler 的量通常进不了 top8，浅采样会导致归因覆盖率极低。
-    collectGraphqlBreakdown(env, zone, "referrer", "clientRequestReferer", "无 Referer", "requests", 24),
     collectGraphqlBreakdown(env, zone, "agent", "clientDeviceType", "未知设备", "requests", 8),
-    collectGraphqlBreakdown(env, zone, "aiAgent", "clientRequestUserAgent", "未知 User-Agent", "requests", 40),
+    collectGraphqlBreakdown(env, zone, "aiAgent", "userAgent", "未知 User-Agent", "requests", 40),
   ]);
-  const identityRows = buildIdentityBreakdowns(zone.name, userAgents, referers, "Cloudflare User-Agent / Referer 维度");
+  const identityRows = buildIdentityBreakdowns(zone.name, userAgents, [], "Cloudflare 近 24 小时 User-Agent 采样");
 
   const rows = [
     ...countries,
-    ...hosts,
+    ...normalizeHostRows(hosts, zone.name),
     ...paths,
-    ...referers.map((row) => ({ ...row, label: simplifyReferrer(row.label) })),
     ...devices.map((row) => ({ ...row, label: deviceLabel(row.label) })),
     ...identityRows,
   ];
@@ -723,7 +709,8 @@ async function collectGraphqlBreakdown(
   unit: TrafficBreakdown["unit"],
   limit = 8,
 ): Promise<TrafficBreakdown[]> {
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // 免费计划的明细维度最多支持 1 天窗口；取近 23 小时保守规避时钟偏差。
+  const since = new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString();
   const until = new Date().toISOString();
   const query = `query ZoneBreakdown($zoneTag: string!, $since: Time!, $until: Time!) {
     viewer { zones(filter: { zoneTag: $zoneTag }) {
@@ -750,7 +737,7 @@ async function collectGraphqlBreakdown(
           row.count || 0,
           unit,
           "real",
-          "来自 Cloudflare GraphQL HTTP Requests Adaptive Groups。",
+          "来自 Cloudflare GraphQL 近 24 小时请求采样（免费计划明细窗口上限 1 天）。",
         ),
       )
       .filter((row) => row.value > 0);
@@ -758,6 +745,38 @@ async function collectGraphqlBreakdown(
     console.warn(`Cloudflare breakdown skipped for ${zone.name}:${dimensionField}`, error);
     return [];
   }
+}
+
+/** 近 24h 各 hostname 的真实请求分布，用于把 30 天根域名总量按比例外推到子域名 */
+async function collectHostDistribution(env: Env, zone: { id: string; name: string }): Promise<Map<string, number>> {
+  const rows = await collectGraphqlBreakdown(env, zone, "host", "clientRequestHTTPHost", zone.name, "requests", 20);
+  const distribution = new Map<string, number>();
+  for (const row of rows) {
+    const hostname = normalizeHostLabel(row.label);
+    if (hostname !== zone.name && !hostname.endsWith(`.${zone.name}`)) continue;
+    distribution.set(hostname, (distribution.get(hostname) ?? 0) + row.value);
+  }
+  return distribution;
+}
+
+/** 去掉端口后缀并合并（jovlo.8xd.io:8080 → jovlo.8xd.io），过滤伪造/外部 Host */
+function normalizeHostRows(rows: TrafficBreakdown[], zoneName: string): TrafficBreakdown[] {
+  const merged = new Map<string, TrafficBreakdown>();
+  for (const row of rows) {
+    const label = normalizeHostLabel(row.label);
+    if (label !== zoneName && !label.endsWith(`.${zoneName}`)) continue;
+    const existing = merged.get(label);
+    if (existing) {
+      existing.value += row.value;
+    } else {
+      merged.set(label, { ...row, label });
+    }
+  }
+  return [...merged.values()];
+}
+
+function normalizeHostLabel(value: string): string {
+  return value.toLowerCase().replace(/:\d+$/, "");
 }
 
 function estimateZoneBreakdowns(

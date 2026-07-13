@@ -736,7 +736,7 @@ function OverviewView({
         />
         {scope.type === "hostname" ? (
           <div className="notice subtle">
-            子域名级流量为按根域名汇总均分的估算值（Cloudflare 免费计划暂无 host 维度明细），健康检查与 Worker 指标为真实数据。
+            子域名级流量为估算值：按近 24 小时真实 host 分布，把 30 天根域名总量按比例外推（免费计划 host 明细窗口上限 1 天）。健康检查与 Worker 指标为真实数据。
           </div>
         ) : null}
         <KpiStrip snapshot={snapshot} />
@@ -943,7 +943,7 @@ function LawyerHomepageView({ snapshot }: { snapshot: DashboardSnapshot }) {
           <div className="attribution-notes">
             <p>Cloudflare Zone 指标提供根域名请求、访问、威胁和流量大小，是当前主数据源。</p>
             <p>Pageview beacon 是浏览器端页面浏览事件，用来补充路径、Referer、设备和会话；不记录原始 IP，也抓不到大多数不执行 JS 的 AI crawler。</p>
-            <p>AI / GEO 来源基于 Cloudflare 边缘请求 Top 40 User-Agent 与 Top 24 Referer 的真实采样归因，不足以覆盖的长尾会落入"未知"，不再用估算比例填充；后续可接 Logpush 或 AI Crawl Control 做全量明细。</p>
+            <p>AI / GEO 来源基于 Cloudflare 边缘请求近 24 小时 Top 40 User-Agent 真实采样归因（免费计划明细窗口上限 1 天，Referer 维度无权限，由浏览器埋点补充）；覆盖不到的长尾落入"未知"，不用估算比例填充。</p>
           </div>
         </Panel>
       </div>
@@ -1011,7 +1011,7 @@ function JovloView({ snapshot, range }: { snapshot: DashboardSnapshot; range: Ti
       </div>
       {snapshot.trends.length ? <TrendCard title="请求趋势" trends={snapshot.trends} compact /> : null}
       <div className="notice subtle">
-        健康检查与 Worker 请求为真实数据；子域名请求 / 访问为按根域名均分的估算值，待接入 host 维度明细后替换。
+        健康检查与 Worker 请求为真实数据；子域名请求 / 访问按近 24 小时真实 host 分布比例外推 30 天总量，属于估算值。
       </div>
     </div>
   );
@@ -1630,7 +1630,7 @@ function OriginPanel({
           </div>
         ))}
       </div>
-      <span className="muted freshness-note">子域名流量为均分估算，待 host 维度数据校准。</span>
+      <span className="muted freshness-note">按近 24 小时真实 host 分布外推 30 天总量的估算值。</span>
     </Panel>
   );
 }
