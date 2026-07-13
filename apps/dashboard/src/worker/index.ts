@@ -579,7 +579,7 @@ async function collectDomainMetrics(
           "次",
           "hostname",
           hostname,
-          "cached",
+          "estimated",
         ),
       );
       metrics.push(
@@ -590,7 +590,7 @@ async function collectDomainMetrics(
           "次",
           "hostname",
           hostname,
-          "cached",
+          "estimated",
         ),
       );
     }

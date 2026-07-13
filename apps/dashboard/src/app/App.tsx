@@ -4,7 +4,6 @@ import {
   BarChart3,
   Bell,
   Box,
-  CalendarDays,
   CheckCircle2,
   ChevronRight,
   Cloud,
@@ -12,25 +11,23 @@ import {
   Database,
   Globe2,
   HardDrive,
-  HelpCircle,
   Home,
   Layers3,
   Link2,
   Lock,
   LogOut,
   Mail,
-  Menu,
   RefreshCw,
   Scale,
-  Search,
   Server,
   Settings,
   Shield,
   Sparkles,
   Users,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Area,
   AreaChart,
@@ -38,8 +35,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -60,6 +55,16 @@ import {
   type AuthConfig,
 } from "./api";
 import {
+  buildUrl,
+  normalizeRoute,
+  parseRoute,
+  parseScope,
+  routesEqual,
+  scopeValue,
+  type NavKey,
+  type RouteState,
+} from "./router";
+import {
   clearSupabaseManualLogout,
   markSupabaseManualLogout,
   wasSupabaseManualLogout,
@@ -67,30 +72,60 @@ import {
 import type { DashboardSnapshot, TimeRange, TrendPoint } from "../shared/snapshot";
 import type { ConnectorCard, ResourceRecord, ScopeOption, ScopeRef, TrafficBreakdown } from "../shared/types";
 
-type NavKey =
-  | "overview"
-  | "lawyer"
-  | "cloudflare"
-  | "domains"
-  | "workers"
-  | "storage"
-  | "database"
-  | "connectors"
-  | "alerts"
-  | "settings";
+interface NavItem {
+  key: NavKey;
+  label: string;
+  hint?: string;
+  icon: LucideIcon;
+}
 
-const navItems: { key: NavKey; label: string; icon: LucideIcon }[] = [
-  { key: "overview", label: "总览", icon: Home },
-  { key: "lawyer", label: "律师主页", icon: Scale },
-  { key: "cloudflare", label: "Cloudflare", icon: Cloud },
-  { key: "domains", label: "域名", icon: Globe2 },
-  { key: "workers", label: "Workers & Pages", icon: Server },
-  { key: "storage", label: "存储", icon: HardDrive },
-  { key: "database", label: "数据库与队列", icon: Database },
-  { key: "connectors", label: "连接器", icon: Link2 },
-  { key: "alerts", label: "告警与日志", icon: Bell },
-  { key: "settings", label: "设置", icon: Settings },
+const navGroups: { title: string; items: NavItem[] }[] = [
+  {
+    title: "概览",
+    items: [
+      { key: "overview", label: "总览", icon: Home },
+      { key: "domains", label: "域名管理", icon: Globe2 },
+    ],
+  },
+  {
+    title: "站点监控",
+    items: [
+      { key: "lawyer", label: "律师主页", hint: "fangliying.com", icon: Scale },
+      { key: "jovlo", label: "Jovlo.ai", hint: "jovlo.8xd.io", icon: Sparkles },
+    ],
+  },
+  {
+    title: "Cloudflare 资源",
+    items: [
+      { key: "cloudflare", label: "核心指标", icon: Cloud },
+      { key: "workers", label: "Workers & Pages", icon: Server },
+      { key: "storage", label: "存储", icon: HardDrive },
+      { key: "database", label: "数据库与队列", icon: Database },
+    ],
+  },
+  {
+    title: "系统",
+    items: [
+      { key: "connectors", label: "连接器", icon: Link2 },
+      { key: "alerts", label: "告警与日志", icon: Bell },
+      { key: "settings", label: "设置", icon: Settings },
+    ],
+  },
 ];
+
+const navTitles: Record<NavKey, string> = {
+  overview: "总览",
+  lawyer: "律师主页",
+  jovlo: "Jovlo.ai",
+  cloudflare: "Cloudflare 核心指标",
+  domains: "域名管理",
+  workers: "Workers & Pages",
+  storage: "存储",
+  database: "数据库与队列",
+  connectors: "连接器",
+  alerts: "告警与日志",
+  settings: "设置",
+};
 
 const rangeLabels: Record<TimeRange, string> = {
   "24h": "近 24 小时",
@@ -108,7 +143,7 @@ const resourceTypeLabels: Record<ResourceRecord["type"], string> = {
   d1: "D1",
   queue: "Queues",
   vectorize: "Vectorize",
-  connector: "连接器",
+  connector: "健康检查",
 };
 
 const statusLabels: Record<ResourceRecord["status"], string> = {
@@ -132,12 +167,37 @@ const defaultAuthConfig: AuthConfig = {
 export function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
-  const [range, setRange] = useState<TimeRange>(() => initialRange());
-  const [scope, setScope] = useState<ScopeRef>(() => initialScope());
-  const [activeNav, setActiveNav] = useState<NavKey>(() => initialNav());
+  const [route, setRoute] = useState<RouteState>(() => normalizeRoute(parseRoute(window.location)));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string>("刚刚同步");
+  const urlSyncedOnce = useRef(false);
+
+  const navigate = (partial: Partial<RouteState>) => {
+    setRoute((current) => {
+      const next = normalizeRoute({ ...current, ...partial });
+      return routesEqual(current, next) ? current : next;
+    });
+  };
+
+  useEffect(() => {
+    const url = buildUrl(route);
+    if (`${window.location.pathname}${window.location.search}` !== url) {
+      if (urlSyncedOnce.current) {
+        window.history.pushState(null, "", url);
+      } else {
+        window.history.replaceState(null, "", url);
+      }
+    }
+    urlSyncedOnce.current = true;
+    document.title = `${navTitles[route.nav]} · 8XD.IO Dashboard`;
+  }, [route]);
+
+  useEffect(() => {
+    const onPopState = () => setRoute(normalizeRoute(parseRoute(window.location)));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,7 +217,7 @@ export function App() {
     if (!authenticated) return;
     let cancelled = false;
     setLoading(true);
-    fetchDashboard(range, scope)
+    fetchDashboard(route.range, route.scope)
       .then((nextSnapshot) => {
         if (cancelled) return;
         setSnapshot(nextSnapshot);
@@ -173,13 +233,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, range, scope]);
-
-  useEffect(() => {
-    if (activeNav === "lawyer" && (scope.type !== "domain" || scope.id !== "fangliying.com")) {
-      setScope({ type: "domain", id: "fangliying.com" });
-    }
-  }, [activeNav, scope.type, scope.id]);
+  }, [authenticated, route.range, route.scope.type, route.scope.id]);
 
   async function handleLogin(password: string, turnstileToken?: string) {
     await login(password, turnstileToken);
@@ -209,7 +263,7 @@ export function App() {
     try {
       const message = await syncCloudflare();
       setSyncMessage(message);
-      const nextSnapshot = await fetchDashboard(range, scope);
+      const nextSnapshot = await fetchDashboard(route.range, route.scope);
       setSnapshot(nextSnapshot);
     } catch (syncError) {
       setSyncMessage(syncError instanceof Error ? syncError.message : "同步失败");
@@ -226,26 +280,26 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activeNav={activeNav} onNavigate={setActiveNav} />
+      <Sidebar activeNav={route.nav} onNavigate={(nav) => navigate({ nav })} />
       <main className="main-shell">
         <Topbar
           snapshot={snapshot}
-          scope={scope}
-          range={range}
+          scope={route.scope}
+          range={route.range}
           syncMessage={syncMessage}
           loading={loading}
-          onScopeChange={setScope}
-          onRangeChange={setRange}
+          onScopeChange={(scope) => navigate({ scope })}
+          onRangeChange={(range) => navigate({ range })}
           onSync={handleSync}
           onLogout={handleLogout}
         />
         {error ? <div className="notice danger">{error}</div> : null}
         <PageContent
-          nav={activeNav}
+          nav={route.nav}
           snapshot={snapshot}
-          scope={scope}
-          range={range}
-          onScopeChange={setScope}
+          scope={route.scope}
+          range={route.range}
+          onNavigate={navigate}
         />
       </main>
     </div>
@@ -488,25 +542,30 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="workspace">
-        <Menu size={18} />
         <span className="brand-mark">8XD</span>
         <span>8XD.IO</span>
       </div>
       <nav className="side-nav">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={item.key === activeNav ? "nav-item active" : "nav-item"}
-              key={item.key}
-              onClick={() => onNavigate(item.key)}
-            >
-              <Icon size={17} />
-              <span>{item.label}</span>
-              {item.key === "connectors" ? <span className="new-badge">新</span> : null}
-            </button>
-          );
-        })}
+        {navGroups.map((group) => (
+          <div className="nav-group" key={group.title}>
+            <span className="nav-group-title">{group.title}</span>
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  className={item.key === activeNav ? "nav-item active" : "nav-item"}
+                  key={item.key}
+                  aria-current={item.key === activeNav ? "page" : undefined}
+                  onClick={() => onNavigate(item.key)}
+                >
+                  <Icon size={17} />
+                  <span className="nav-label">{item.label}</span>
+                  {item.hint ? <span className="nav-hint">{item.hint}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </nav>
       <div className="system-card">
         <CheckCircle2 size={16} />
@@ -541,51 +600,47 @@ function Topbar({
   onSync: () => void;
   onLogout: () => void;
 }) {
-  const scopeOptions = useMemo(() => flattenScopes(snapshot), [snapshot]);
+  const scopeGroups = useMemo(() => groupedScopes(snapshot), [snapshot]);
 
   return (
     <header className="topbar">
-      <div className="search-box">
-        <Search size={16} />
-        <input placeholder="搜索资源、指标或文档..." />
-        <kbd>⌘K</kbd>
-      </div>
       <label className="scope-select">
         <span>范围</span>
         <select value={scopeValue(scope)} onChange={(event) => onScopeChange(parseScope(event.target.value))}>
-          {scopeOptions.map((option) => (
-            <option key={scopeValue(option)} value={scopeValue(option)}>
-              {option.kindLabel} / {option.label}
-            </option>
+          {scopeGroups.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.options.map((option) => (
+                <option key={scopeValue(option)} value={scopeValue(option)}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>
-      <div className="range-group" aria-label="时间范围">
+      <div className="range-group" role="group" aria-label="时间范围">
         {(Object.keys(rangeLabels) as TimeRange[]).map((item) => (
           <button
             className={item === range ? "range-button active" : "range-button"}
             key={item}
             onClick={() => onRangeChange(item)}
           >
-            <CalendarDays size={15} />
             {rangeLabels[item]}
           </button>
         ))}
       </div>
-      <div className="sync-pill">
+      <div className="topbar-spacer" />
+      <div className="sync-pill" title={syncMessage}>
         <span className="sync-dot" />
-        {syncMessage}
+        <span className="sync-text">{syncMessage}</span>
       </div>
       <button className="icon-button" onClick={onSync} title="刷新并同步 Cloudflare">
-        <RefreshCw className={loading ? "spin" : undefined} size={17} />
+        <RefreshCw className={loading ? "spin" : undefined} size={16} />
         <span>刷新</span>
       </button>
-      <button className="icon-only" title="帮助">
-        <HelpCircle size={18} />
-      </button>
-      <button className="avatar-button" onClick={onLogout} title="退出登录">
-        <span>J</span>
-        <LogOut size={14} />
+      <button className="icon-button subtle" onClick={onLogout} title="退出登录">
+        <LogOut size={15} />
+        <span>退出</span>
       </button>
     </header>
   );
@@ -596,32 +651,46 @@ function PageContent({
   snapshot,
   scope,
   range,
-  onScopeChange,
+  onNavigate,
 }: {
   nav: NavKey;
   snapshot: DashboardSnapshot;
   scope: ScopeRef;
   range: TimeRange;
-  onScopeChange: (scope: ScopeRef) => void;
+  onNavigate: (partial: Partial<RouteState>) => void;
 }) {
-  if (nav === "cloudflare") return <CloudflareView snapshot={snapshot} onScopeChange={onScopeChange} />;
-  if (nav === "lawyer") return <LawyerHomepageView snapshot={snapshot} onScopeChange={onScopeChange} />;
-  if (nav === "domains") return <DomainsView snapshot={snapshot} onScopeChange={onScopeChange} />;
-  if (nav === "workers") return <WorkersPagesView snapshot={snapshot} onScopeChange={onScopeChange} />;
-  if (nav === "storage") return <StorageView snapshot={snapshot} onScopeChange={onScopeChange} />;
+  const openScopeDashboard = (nextScope: ScopeRef) => onNavigate({ nav: "overview", scope: nextScope });
+
+  if (nav === "cloudflare") return <CloudflareView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
+  if (nav === "lawyer") return <LawyerHomepageView snapshot={snapshot} />;
+  if (nav === "jovlo") return <JovloView snapshot={snapshot} range={range} />;
+  if (nav === "domains") return <DomainsView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
+  if (nav === "workers") return <WorkersPagesView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
+  if (nav === "storage") return <StorageView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
   if (nav === "database") return <DatabaseView snapshot={snapshot} />;
   if (nav === "connectors") return <ConnectorsView snapshot={snapshot} />;
   if (nav === "alerts") return <AlertsView snapshot={snapshot} />;
   if (nav === "settings") return <SettingsView snapshot={snapshot} range={range} scope={scope} />;
-  return <OverviewView snapshot={snapshot} onScopeChange={onScopeChange} />;
+  return (
+    <OverviewView
+      snapshot={snapshot}
+      scope={scope}
+      onOpenScope={openScopeDashboard}
+      onResetScope={() => onNavigate({ scope: { type: "global", id: "global" } })}
+    />
+  );
 }
 
 function OverviewView({
   snapshot,
-  onScopeChange,
+  scope,
+  onOpenScope,
+  onResetScope,
 }: {
   snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
+  scope: ScopeRef;
+  onOpenScope: (scope: ScopeRef) => void;
+  onResetScope: () => void;
 }) {
   return (
     <div className="page-grid">
@@ -629,12 +698,24 @@ function OverviewView({
         <PageHeader
           title={snapshot.summary.title}
           description="所有平台的资源、用量与健康状态。当前第一版真实接入 Cloudflare，其它平台保持连接器占位。"
+          action={
+            scope.type !== "global" ? (
+              <button className="secondary-button" onClick={onResetScope}>
+                返回全局总览
+              </button>
+            ) : undefined
+          }
         />
+        {scope.type === "hostname" ? (
+          <div className="notice subtle">
+            子域名级流量为按根域名汇总均分的估算值（Cloudflare 免费计划暂无 host 维度明细），健康检查与 Worker 指标为真实数据。
+          </div>
+        ) : null}
         <KpiStrip snapshot={snapshot} />
         {snapshot.summary.emptyState ? <div className="notice">{snapshot.summary.emptyState}</div> : null}
         <TrendCard title="访问与请求趋势" trends={snapshot.trends} />
         <CloudflareMetrics snapshot={snapshot} />
-        <ResourceTable snapshot={snapshot} onScopeChange={onScopeChange} />
+        <ResourceTable snapshot={snapshot} onOpenScope={onOpenScope} />
       </section>
       <aside className="right-rail">
         <ConnectorPanel connectors={snapshot.connectors} />
@@ -648,10 +729,10 @@ function OverviewView({
 
 function CloudflareView({
   snapshot,
-  onScopeChange,
+  onOpenScope,
 }: {
   snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
+  onOpenScope: (scope: ScopeRef) => void;
 }) {
   const [typeFilter, setTypeFilter] = useState<ResourceRecord["type"] | "all">("all");
   const cloudflareResources = snapshot.resources.filter((resource) => resource.platform === "Cloudflare");
@@ -661,7 +742,7 @@ function CloudflareView({
   return (
     <div className="full-page">
       <PageHeader
-        title="Cloudflare 指标"
+        title="Cloudflare 核心指标"
         description="按当前范围展示 Zone、Pages、Workers、R2、KV、D1、Queues、Vectorize 的真实资源与可用指标。"
       />
       <KpiStrip snapshot={snapshot} compact />
@@ -689,7 +770,7 @@ function CloudflareView({
       <CloudflareMetrics snapshot={snapshot} />
       <ResourceTable
         snapshot={{ ...snapshot, resources: filteredResources }}
-        onScopeChange={onScopeChange}
+        onOpenScope={onOpenScope}
         title="Cloudflare 资源明细"
       />
     </div>
@@ -698,27 +779,29 @@ function CloudflareView({
 
 function DomainsView({
   snapshot,
-  onScopeChange,
+  onOpenScope,
 }: {
   snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
+  onOpenScope: (scope: ScopeRef) => void;
 }) {
   return (
     <div className="full-page">
       <PageHeader
         title="域名管理"
-        description="根域名、子域名、关联项目、请求、访问、威胁和最高峰日期。可从这里切换到单个域名或 hostname 的专属 Dashboard。"
+        description="根域名、子域名、关联项目、请求、访问、威胁和最高峰日期。点击卡片或子域名可进入对应的专属总览。"
       />
       <div className="notice subtle">
-        根域名请求来自 Cloudflare 真实 Zone 汇总；子域名明细在 Cloudflare 未返回 host 维度时会按估算展示，并在律师主页页签单独标注数据来源。
+        根域名请求来自 Cloudflare 真实 Zone 汇总；子域名明细在 Cloudflare 未返回 host 维度时按估算展示，并在对应页面标注数据来源。
       </div>
       <div className="domain-grid">
         {snapshot.domains.map((domain) => (
-          <button className="domain-card" key={domain.domain} onClick={() => onScopeChange({ type: "domain", id: domain.domain })}>
+          <button className="domain-card" key={domain.domain} onClick={() => onOpenScope({ type: "domain", id: domain.domain })}>
             <div className="card-title-row">
               <Globe2 size={18} />
-              <strong>{domain.domain}</strong>
-              <span className="status success">{domain.status === "active" ? "正常" : domain.status}</span>
+              <strong className="cell-ellipsis">{domain.domain}</strong>
+              <span className={domain.status === "active" ? "status success" : "status muted"}>
+                {domain.status === "active" ? "正常" : domain.status}
+              </span>
             </div>
             <div className="domain-stats">
               <MetricInline label="请求数" value={formatNumber(domain.requests)} />
@@ -731,24 +814,32 @@ function DomainsView({
       </div>
       <Panel title="子域名明细">
         <div className="table">
-          <div className="table-row table-head">
+          <div className="table-row table-head domains-table">
             <span>子域名</span>
             <span>所属根域名</span>
+            <span>关联服务</span>
             <span>状态</span>
             <span>操作</span>
           </div>
           {snapshot.domains.flatMap((domain) =>
-            domain.hostnames.map((hostname) => (
-              <div className="table-row" key={`${domain.domain}:${hostname}`}>
-                <span>{hostname}</span>
-                <span>{domain.domain}</span>
-                <span className="status success">正常</span>
-                <button className="text-button" onClick={() => onScopeChange({ type: "hostname", id: hostname })}>
-                  查看专属 Dashboard
-                  <ChevronRight size={15} />
-                </button>
-              </div>
-            )),
+            domain.hostnames.map((hostname) => {
+              const service = serviceForHostname(snapshot, hostname);
+              const health = healthForHostname(snapshot, hostname);
+              return (
+                <div className="table-row domains-table" key={`${domain.domain}:${hostname}`}>
+                  <span className="cell-ellipsis">{hostname}</span>
+                  <span className="cell-ellipsis">{domain.domain}</span>
+                  <span className="cell-ellipsis muted">{service || "—"}</span>
+                  <span className={health === "error" ? "status danger" : "status success"}>
+                    {health === "error" ? "异常" : "正常"}
+                  </span>
+                  <button className="text-button" onClick={() => onOpenScope({ type: "hostname", id: hostname })}>
+                    专属总览
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              );
+            }),
           )}
         </div>
       </Panel>
@@ -756,13 +847,7 @@ function DomainsView({
   );
 }
 
-function LawyerHomepageView({
-  snapshot,
-  onScopeChange,
-}: {
-  snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
-}) {
+function LawyerHomepageView({ snapshot }: { snapshot: DashboardSnapshot }) {
   const domain = snapshot.domains.find((item) => item.domain === "fangliying.com");
   const breakdowns = snapshot.trafficBreakdowns.filter((row) => row.scopeId === "fangliying.com");
   const cloudflareViews = breakdowns.find((row) => row.kind === "event" && row.label.includes("Cloudflare"))?.value || domain?.visits || 0;
@@ -782,13 +867,15 @@ function LawyerHomepageView({
       <PageHeader
         title="律师主页流量"
         description="fangliying.com 的请求、访问、来源、地区、路径与站内埋点。Cloudflare 根域名请求和浏览器 pageview 分开展示。"
+        action={
+          <a className="secondary-button" href="https://fangliying.com" target="_blank" rel="noreferrer">
+            <Globe2 size={15} />
+            fangliying.com
+          </a>
+        }
       />
-      <div className="toolbar-panel">
-        <button className="secondary-button" onClick={() => onScopeChange({ type: "domain", id: "fangliying.com" })}>
-          <Globe2 size={15} />
-          fangliying.com
-        </button>
-        <span className="muted">请求数包含 HTML、JS、CSS、图片、预览抓取、搜索爬虫和 Agent；站内埋点只统计浏览器页面事件。</span>
+      <div className="notice subtle">
+        请求数包含 HTML、JS、CSS、图片、预览抓取、搜索爬虫和 Agent；站内埋点只统计浏览器页面事件。
       </div>
       <div className="lawyer-kpis">
         <MetricInline label="Cloudflare 请求" value={formatNumber(domain?.requests || metricForScope(snapshot, "requests", "domain", "fangliying.com"))} status="根域名" />
@@ -835,6 +922,72 @@ function LawyerHomepageView({
   );
 }
 
+function JovloView({ snapshot, range }: { snapshot: DashboardSnapshot; range: TimeRange }) {
+  const health = snapshot.resources.find(
+    (resource) => resource.type === "connector" && resource.hostnames.includes("jovlo.8xd.io"),
+  );
+  const healthMeta = (health?.metadata ?? {}) as {
+    url?: string;
+    httpStatus?: number;
+    responseMs?: number;
+    error?: string;
+  };
+  const isUp = health?.status === "active";
+  const responseMs = health ? metricForScope(snapshot, "responseMs", "resource", health.id) : 0;
+  const requests = metricForScope(snapshot, "requests", "hostname", "jovlo.8xd.io");
+  const visits = metricForScope(snapshot, "visits", "hostname", "jovlo.8xd.io");
+  const worker = snapshot.resources.find(
+    (resource) => resource.type === "worker" && resource.hostnames.includes("jovlo.8xd.io"),
+  );
+  const workerRequests = worker ? metricForScope(snapshot, "workerRequests", "resource", worker.id) : 0;
+
+  return (
+    <div className="full-page">
+      <PageHeader
+        title="Jovlo.ai 站点监控"
+        description="jovlo.8xd.io 的健康检查、Worker 请求与子域名流量。健康检查每 15 分钟由 Dashboard Worker 定时执行。"
+        action={
+          <a className="secondary-button" href="https://jovlo.8xd.io" target="_blank" rel="noreferrer">
+            <Sparkles size={15} />
+            jovlo.8xd.io
+          </a>
+        }
+      />
+      {health ? (
+        <div className={isUp ? "site-status up" : "site-status down"}>
+          {isUp ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+          <div>
+            <strong>{isUp ? "服务正常" : "服务异常"}</strong>
+            <span className="cell-ellipsis">
+              {healthMeta.url || "https://jovlo.8xd.io/api/health"}
+              {healthMeta.error ? ` · ${healthMeta.error}` : ""}
+            </span>
+          </div>
+          <span className="muted">最近检查：{health.lastSyncedAt ? formatDateTime(health.lastSyncedAt) : "待同步"}</span>
+        </div>
+      ) : (
+        <div className="notice">健康检查数据待首次同步，点击右上角「刷新」可立即触发。</div>
+      )}
+      <div className="lawyer-kpis">
+        <MetricInline label="HTTP 状态" value={healthMeta.httpStatus ? String(healthMeta.httpStatus) : "—"} status="真实" />
+        <MetricInline
+          label="响应时间"
+          value={responseMs || healthMeta.responseMs ? `${formatNumber(responseMs || Number(healthMeta.responseMs))} ms` : "—"}
+          status="真实"
+        />
+        <MetricInline label="Worker 请求" value={formatNumber(workerRequests)} status={worker ? worker.name : "jovlo-ai"} />
+        <MetricInline label="子域名请求" value={formatNumber(requests)} status="估算" />
+        <MetricInline label="子域名访问" value={formatNumber(visits)} status="估算" />
+        <MetricInline label="时间范围" value={rangeLabels[range]} status="Cloudflare" />
+      </div>
+      {snapshot.trends.length ? <TrendCard title="请求趋势" trends={snapshot.trends} compact /> : null}
+      <div className="notice subtle">
+        健康检查与 Worker 请求为真实数据；子域名请求 / 访问为按根域名均分的估算值，待接入 host 维度明细后替换。
+      </div>
+    </div>
+  );
+}
+
 function BreakdownBarPanel({ title, rows }: { title: string; rows: TrafficBreakdown[] }) {
   const data = rows.slice(0, 8).map((row) => ({
     label: row.label.length > 18 ? `${row.label.slice(0, 18)}...` : row.label,
@@ -851,11 +1004,11 @@ function BreakdownBarPanel({ title, rows }: { title: string; rows: TrafficBreakd
           <div className="bar-chart-box">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
-                <CartesianGrid stroke="#e8edf5" horizontal={false} />
+                <CartesianGrid stroke="#eef2f7" horizontal={false} />
                 <XAxis type="number" tickLine={false} axisLine={false} />
                 <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={118} />
                 <Tooltip
-                  contentStyle={{ borderRadius: 8, borderColor: "#dfe5ee" }}
+                  contentStyle={{ borderRadius: 10, borderColor: "#e2e8f0" }}
                   formatter={(value) => [formatNumber(Number(value)), "次数"]}
                   labelFormatter={(_, payload) => payload?.[0]?.payload?.fullLabel || ""}
                 />
@@ -890,10 +1043,10 @@ function BreakdownBarPanel({ title, rows }: { title: string; rows: TrafficBreakd
 
 function WorkersPagesView({
   snapshot,
-  onScopeChange,
+  onOpenScope,
 }: {
   snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
+  onOpenScope: (scope: ScopeRef) => void;
 }) {
   const resources = snapshot.resources.filter((resource) => resource.type === "worker" || resource.type === "pages");
   return (
@@ -922,17 +1075,17 @@ function WorkersPagesView({
         </Panel>
         <TrendCard title="Worker 请求趋势" trends={snapshot.trends} compact />
       </div>
-      <ResourceTable snapshot={{ ...snapshot, resources }} onScopeChange={onScopeChange} title="绑定资源" />
+      <ResourceTable snapshot={{ ...snapshot, resources }} onOpenScope={onOpenScope} title="绑定资源" />
     </div>
   );
 }
 
 function StorageView({
   snapshot,
-  onScopeChange,
+  onOpenScope,
 }: {
   snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
+  onOpenScope: (scope: ScopeRef) => void;
 }) {
   const resources = snapshot.resources.filter((resource) => resource.type === "r2" || resource.type === "kv");
   const r2Objects = metricNumber(snapshot, "r2Objects");
@@ -959,7 +1112,7 @@ function StorageView({
           <StorageGauge label="KV 操作" value={formatNumber(kvOperations)} helper="近 30 天读写与列表" percent={quotaPercent(kvOperations, 3000000)} danger />
         </Panel>
       </div>
-      <ResourceTable snapshot={{ ...snapshot, resources }} onScopeChange={onScopeChange} title="存储资源列表" />
+      <ResourceTable snapshot={{ ...snapshot, resources }} onOpenScope={onOpenScope} title="存储资源列表" />
     </div>
   );
 }
@@ -972,16 +1125,23 @@ function DatabaseView({ snapshot }: { snapshot: DashboardSnapshot }) {
     <div className="full-page">
       <PageHeader
         title="数据库与队列"
-        description="D1、Queues、Vectorize 作为扩展位保留；当前 Cloudflare 账号下暂无这些资源。"
+        description="D1、Queues、Vectorize 作为扩展位保留；Dashboard 自身的指标缓存使用 D1。"
       />
       <div className="empty-resource-grid">
         {emptyResources.map((resource) => (
           <Panel title={resource.name} key={resource.id}>
-            <div className="empty-state">
-              <Database size={28} />
-              <strong>{resource.metadata?.emptyLabel ? String(resource.metadata.emptyLabel) : "暂无资源"}</strong>
-              <span>未来可用于 Dashboard 缓存、任务队列、向量检索和告警聚合。</span>
-            </div>
+            {resource.status === "empty" ? (
+              <div className="empty-state">
+                <Database size={28} />
+                <strong>{resource.metadata?.emptyLabel ? String(resource.metadata.emptyLabel) : "暂无资源"}</strong>
+                <span>未来可用于 Dashboard 缓存、任务队列、向量检索和告警聚合。</span>
+              </div>
+            ) : (
+              <div className="connector-detail">
+                <span className={resourceStatusClass(resource.status)}>{statusLabels[resource.status]}</span>
+                <p>类型：{resourceTypeLabels[resource.type]}</p>
+              </div>
+            )}
           </Panel>
         ))}
       </div>
@@ -997,20 +1157,7 @@ function ConnectorsView({ snapshot }: { snapshot: DashboardSnapshot }) {
         description="Cloudflare 已连接；Supabase、Firebase、Google Cloud 先保留授权入口与可采集指标规划，不展示假数据。"
       />
       <div className="two-up">
-        <Panel title="同步热力">
-          <div className="heatmap" aria-label="同步热力">
-            {Array.from({ length: 120 }, (_, index) => (
-              <span className={index > 111 ? "heat active" : index % 13 === 0 ? "heat mid" : "heat"} key={index} />
-            ))}
-          </div>
-          <div className="heat-legend">
-            <span>少</span>
-            <i />
-            <i className="mid" />
-            <i className="active" />
-            <span>多</span>
-          </div>
-        </Panel>
+        <ConnectorPanel connectors={snapshot.connectors} />
         <UsagePanel snapshot={snapshot} />
       </div>
       <div className="connector-list">
@@ -1021,7 +1168,6 @@ function ConnectorsView({ snapshot }: { snapshot: DashboardSnapshot }) {
               <div className="connector-detail">
                 <StatusPill card={card} />
                 <p>{connector.message || connectorPlanText(connector.platform)}</p>
-                <button className="secondary-button">{connector.real ? "管理连接" : "待授权"}</button>
               </div>
             </Panel>
           );
@@ -1097,6 +1243,7 @@ function SettingsView({
           <code>SUPABASE_URL</code>
           <code>SUPABASE_PUBLISHABLE_KEY</code>
           <code>DASHBOARD_ALLOWED_EMAILS</code>
+          <code>HEALTHCHECK_TARGETS</code>
         </div>
       </Panel>
       <Panel title="登录方案">
@@ -1116,17 +1263,22 @@ function SettingsView({
   );
 }
 
-function PageHeader({ title, description }: { title: string; description: string }) {
+function PageHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="page-header">
       <div>
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
-      <span className="source-chip">
-        <Sparkles size={14} />
-        多域名 / 多项目
-      </span>
+      {action}
     </div>
   );
 }
@@ -1136,9 +1288,6 @@ function KpiStrip({ snapshot, compact = false }: { snapshot: DashboardSnapshot; 
     <div className={compact ? "kpi-grid compact" : "kpi-grid"}>
       {snapshot.summary.cards.map((card) => (
         <div className={`kpi-card ${card.tone}`} key={card.label}>
-          <div className="kpi-icon">
-            <BarChart3 size={18} />
-          </div>
           <span>{card.label}</span>
           <strong>{card.value}</strong>
           <small>{card.helper}</small>
@@ -1149,6 +1298,20 @@ function KpiStrip({ snapshot, compact = false }: { snapshot: DashboardSnapshot; 
   );
 }
 
+type TrendMetric = "requests" | "visits" | "errors";
+
+const trendMetricLabels: Record<TrendMetric, string> = {
+  requests: "请求数",
+  visits: "访问量",
+  errors: "错误",
+};
+
+const trendMetricColors: Record<TrendMetric, string> = {
+  requests: "#2563eb",
+  visits: "#16a34a",
+  errors: "#dc2626",
+};
+
 function TrendCard({
   title,
   trends,
@@ -1158,29 +1321,50 @@ function TrendCard({
   trends: TrendPoint[];
   compact?: boolean;
 }) {
+  const [metricKey, setMetricKey] = useState<TrendMetric>("requests");
+  const color = trendMetricColors[metricKey];
+
   return (
-    <Panel title={title} className={compact ? "trend-panel compact" : "trend-panel"}>
-      <div className="chart-tabs">
-        <span className="chart-tab active">请求数</span>
-        <span className="chart-tab">访问量</span>
-        <span className="chart-tab">错误</span>
-      </div>
+    <Panel
+      title={title}
+      className={compact ? "trend-panel compact" : "trend-panel"}
+      headerExtra={
+        <div className="chart-tabs">
+          {(Object.keys(trendMetricLabels) as TrendMetric[]).map((key) => (
+            <button
+              className={key === metricKey ? "chart-tab active" : "chart-tab"}
+              key={key}
+              onClick={() => setMetricKey(key)}
+            >
+              {trendMetricLabels[key]}
+            </button>
+          ))}
+        </div>
+      }
+    >
       <div className="chart-box">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={trends} margin={{ top: 12, right: 18, bottom: 0, left: 12 }}>
             <defs>
-              <linearGradient id="requestsFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#2563eb" stopOpacity={0.2} />
-                <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
+              <linearGradient id={`trendFill-${metricKey}`} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity={0.18} />
+                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="#e8edf5" vertical={false} />
+            <CartesianGrid stroke="#eef2f7" vertical={false} />
             <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={18} />
             <YAxis tickLine={false} axisLine={false} width={58} />
-            <Tooltip contentStyle={{ borderRadius: 8, borderColor: "#dfe5ee" }} />
-            <Area type="monotone" dataKey="requests" stroke="#2563eb" fill="url(#requestsFill)" strokeWidth={2} />
-            <Line type="monotone" dataKey="visits" stroke="#f97316" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="errors" stroke="#ef4444" strokeWidth={2} dot={false} />
+            <Tooltip
+              contentStyle={{ borderRadius: 10, borderColor: "#e2e8f0" }}
+              formatter={(value) => [formatNumber(Number(value)), trendMetricLabels[metricKey]]}
+            />
+            <Area
+              type="monotone"
+              dataKey={metricKey}
+              stroke={color}
+              fill={`url(#trendFill-${metricKey})`}
+              strokeWidth={2}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -1191,9 +1375,8 @@ function TrendCard({
 function CloudflareMetrics({ snapshot }: { snapshot: DashboardSnapshot }) {
   const metrics: { label: string; value: string; trend: string; danger?: boolean }[] = [
     metricValue(snapshot, "requests", "请求数"),
-    { label: "错误率", value: "0.00%", trend: "0%" },
-    { label: "CPU 时间", value: `${formatNumber(metricNumber(snapshot, "workerCpuMs"))} ms`, trend: "当前范围" },
-    { label: "总耗时", value: `${formatNumber(metricNumber(snapshot, "workerWallMs"))} ms`, trend: "当前范围" },
+    { label: "CPU 时间", value: `${formatNumber(metricNumber(snapshot, "workerCpuMs"))} ms`, trend: "估算" },
+    { label: "总耗时", value: `${formatNumber(metricNumber(snapshot, "workerWallMs"))} ms`, trend: "估算" },
     metricValue(snapshot, "r2Operations", "R2 操作"),
     metricValue(snapshot, "kvOperations", "KV 操作", true),
   ];
@@ -1206,7 +1389,6 @@ function CloudflareMetrics({ snapshot }: { snapshot: DashboardSnapshot }) {
             <span>{metric.label}</span>
             <strong>{metric.value}</strong>
             <em className={metric.danger ? "up" : ""}>{metric.trend}</em>
-            <div className="mini-spark" />
           </div>
         ))}
       </div>
@@ -1216,11 +1398,11 @@ function CloudflareMetrics({ snapshot }: { snapshot: DashboardSnapshot }) {
 
 function ResourceTable({
   snapshot,
-  onScopeChange,
+  onOpenScope,
   title = "资源列表",
 }: {
   snapshot: DashboardSnapshot;
-  onScopeChange: (scope: ScopeRef) => void;
+  onOpenScope: (scope: ScopeRef) => void;
   title?: string;
 }) {
   return (
@@ -1238,15 +1420,15 @@ function ResourceTable({
           <div className="table-row" key={resource.id}>
             <span className="resource-name">
               {resourceIcon(resource)}
-              <span>{resource.name}</span>
+              <span className="cell-ellipsis">{resource.name}</span>
             </span>
-            <span>{resourceTypeLabels[resource.type]}</span>
+            <span className="cell-ellipsis">{resourceTypeLabels[resource.type]}</span>
             <span className={resourceStatusClass(resource.status)}>
               {statusLabels[resource.status]}
             </span>
-            <span>{resource.domain || resource.projectKey}</span>
-            <span>{usageForResource(resource, snapshot)}</span>
-            <button className="text-button" onClick={() => onScopeChange({ type: "resource", id: resource.id })}>
+            <span className="cell-ellipsis">{resource.domain || resource.projectKey}</span>
+            <span className="cell-ellipsis">{usageForResource(resource, snapshot)}</span>
+            <button className="text-button" onClick={() => onOpenScope({ type: "resource", id: resource.id })}>
               查看详情
               <ChevronRight size={15} />
             </button>
@@ -1266,7 +1448,6 @@ function ConnectorPanel({ connectors }: { connectors: ConnectorCard[] }) {
             <CloudLightning size={18} />
             <span>{connector.platform}</span>
             <StatusPill card={connector} />
-            <ChevronRight size={15} />
           </div>
         ))}
       </div>
@@ -1276,6 +1457,7 @@ function ConnectorPanel({ connectors }: { connectors: ConnectorCard[] }) {
 
 function HealthPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   const counts = countResources(snapshot.resources);
+  const extensionCount = (counts.d1 || 0) + (counts.queue || 0) + (counts.vectorize || 0);
   return (
     <Panel title="资源健康">
       <div className="health-grid">
@@ -1284,7 +1466,7 @@ function HealthPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
         <MetricInline label="Worker 脚本" value={String(counts.worker || 0)} status="正常" />
         <MetricInline label="R2 存储桶" value={String(counts.r2 || 0)} status="正常" />
         <MetricInline label="KV 命名空间" value={String(counts.kv || 0)} status="正常" />
-        <MetricInline label="D1 / Queues / Vectorize" value="暂无" status="暂无" />
+        <MetricInline label="D1 / Queues / Vectorize" value={extensionCount ? String(extensionCount) : "暂无"} status="扩展位" />
       </div>
     </Panel>
   );
@@ -1301,7 +1483,7 @@ function FreshnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
         </div>
         <span className="status success">{snapshot.sourceLabel}</span>
       </div>
-      <span className="muted">数据源：Cloudflare API / D1 缓存</span>
+      <span className="muted freshness-note">数据源：Cloudflare API / D1 缓存</span>
     </Panel>
   );
 }
@@ -1325,25 +1507,22 @@ function UsagePanel({ snapshot }: { snapshot: DashboardSnapshot }) {
 
 function OriginPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
-    <Panel title="子域名 / 来源">
-      <div className="origin-search">
-        <Search size={15} />
-        <span>搜索来源...</span>
-      </div>
+    <Panel title="子域名流量">
       <div className="table compact-table">
         <div className="table-row table-head">
-          <span>来源</span>
+          <span>子域名</span>
           <span>请求数</span>
-          <span>请求耗时</span>
+          <span>访问量</span>
         </div>
-        {snapshot.scopes.hostnames.slice(0, 5).map((hostname) => (
+        {snapshot.scopes.hostnames.slice(0, 6).map((hostname) => (
           <div className="table-row" key={hostname.id}>
-            <span>{hostname.label}</span>
+            <span className="cell-ellipsis">{hostname.label}</span>
             <span>{formatNumber(metricForScope(snapshot, "requests", "hostname", hostname.id))}</span>
-            <span>0.65 ms</span>
+            <span>{formatNumber(metricForScope(snapshot, "visits", "hostname", hostname.id))}</span>
           </div>
         ))}
       </div>
+      <span className="muted freshness-note">子域名流量为均分估算，待 host 维度数据校准。</span>
     </Panel>
   );
 }
@@ -1351,16 +1530,19 @@ function OriginPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
 function Panel({
   title,
   className,
+  headerExtra,
   children,
 }: {
   title: string;
   className?: string;
+  headerExtra?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className={className ? `panel ${className}` : "panel"}>
       <div className="panel-header">
         <h2>{title}</h2>
+        {headerExtra}
       </div>
       {children}
     </section>
@@ -1395,8 +1577,8 @@ function MetricInline({ label, value, status }: { label: string; value: string; 
   return (
     <div className="metric-inline">
       <span>{label}</span>
-      <strong>{value}</strong>
-      {status ? <em>{status}</em> : null}
+      <strong title={value}>{value}</strong>
+      {status ? <em title={status}>{status}</em> : null}
     </div>
   );
 }
@@ -1465,40 +1647,29 @@ function resourceIcon(resource: ResourceRecord) {
   return <Box size={16} />;
 }
 
-function flattenScopes(snapshot: DashboardSnapshot): ScopeOption[] {
-  return [
-    snapshot.scopes.global,
-    ...snapshot.scopes.projects,
-    ...snapshot.scopes.domains,
-    ...snapshot.scopes.hostnames,
-    ...snapshot.scopes.resources,
+function groupedScopes(snapshot: DashboardSnapshot): { label: string; options: ScopeOption[] }[] {
+  const groups: { label: string; options: ScopeOption[] }[] = [
+    { label: "全局", options: [snapshot.scopes.global] },
+    { label: "项目", options: snapshot.scopes.projects },
+    { label: "根域名", options: snapshot.scopes.domains },
+    { label: "子域名", options: snapshot.scopes.hostnames },
+    { label: "资源", options: snapshot.scopes.resources },
   ];
+  return groups.filter((group) => group.options.length > 0);
 }
 
-function scopeValue(scope: ScopeRef): string {
-  return `${scope.type}:${scope.id}`;
+function serviceForHostname(snapshot: DashboardSnapshot, hostname: string): string {
+  const resource = snapshot.resources.find(
+    (item) => (item.type === "worker" || item.type === "pages") && item.hostnames.includes(hostname),
+  );
+  return resource?.name ?? "";
 }
 
-function parseScope(value: string): ScopeRef {
-  const [type, ...rest] = value.split(":");
-  const id = rest.join(":");
-  if (type === "project" || type === "domain" || type === "hostname" || type === "resource") return { type, id };
-  return { type: "global", id: "global" };
-}
-
-function initialNav(): NavKey {
-  const view = new URLSearchParams(window.location.search).get("view");
-  return navItems.some((item) => item.key === view) ? (view as NavKey) : "overview";
-}
-
-function initialRange(): TimeRange {
-  const value = new URLSearchParams(window.location.search).get("range");
-  return value === "24h" || value === "7d" || value === "30d" ? value : "30d";
-}
-
-function initialScope(): ScopeRef {
-  const params = new URLSearchParams(window.location.search);
-  return parseScope(`${params.get("scopeType") || "global"}:${params.get("scopeId") || "global"}`);
+function healthForHostname(snapshot: DashboardSnapshot, hostname: string): "ok" | "error" {
+  const health = snapshot.resources.find(
+    (item) => item.type === "connector" && item.hostnames.includes(hostname),
+  );
+  return health?.status === "error" ? "error" : "ok";
 }
 
 function metricValue(snapshot: DashboardSnapshot, key: string, label: string, danger = false) {
@@ -1566,9 +1737,9 @@ function sourceLabel(source: TrafficBreakdown["source"]): string {
 function sourceColor(source: TrafficBreakdown["source"]): string {
   if (source === "real") return "#2563eb";
   if (source === "instrumented") return "#16a34a";
-  if (source === "estimated") return "#f97316";
+  if (source === "estimated") return "#f59e0b";
   if (source === "cached") return "#64748b";
-  return "#ef4444";
+  return "#dc2626";
 }
 
 function usageForResource(resource: ResourceRecord, snapshot: DashboardSnapshot): string {
