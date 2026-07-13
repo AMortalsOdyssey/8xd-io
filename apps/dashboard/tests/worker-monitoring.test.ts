@@ -27,7 +27,7 @@ describe("dashboard monitoring discovery", () => {
     const targets = parseHealthcheckTargets(JSON.stringify([
       {
         id: "jovlo",
-        name: "Jovlo.ai",
+        name: "Jovlo",
         url: "https://jovlo.8xd.io/api/health",
         projectKey: "jovlo",
         domain: "8xd.io",
@@ -38,7 +38,7 @@ describe("dashboard monitoring discovery", () => {
     expect(targets).toEqual([
       {
         id: "jovlo",
-        name: "Jovlo.ai",
+        name: "Jovlo",
         url: "https://jovlo.8xd.io/api/health",
         projectKey: "jovlo",
         domain: "8xd.io",

@@ -37,7 +37,7 @@ Dashboard 中的 `律师主页` 页签会分开展示：
 [
   {
     "id": "jovlo",
-    "name": "Jovlo.ai",
+    "name": "Jovlo",
     "url": "https://jovlo.8xd.io/api/health",
     "projectKey": "jovlo",
     "domain": "8xd.io"

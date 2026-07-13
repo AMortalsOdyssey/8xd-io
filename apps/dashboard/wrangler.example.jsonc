@@ -30,7 +30,7 @@
     "SUPABASE_URL": "",
     "SUPABASE_PUBLISHABLE_KEY": "",
     "DASHBOARD_ALLOWED_EMAILS": "",
-    "HEALTHCHECK_TARGETS": "[{\"id\":\"jovlo\",\"name\":\"Jovlo.ai\",\"url\":\"https://jovlo.8xd.io/api/health\",\"projectKey\":\"jovlo\",\"domain\":\"8xd.io\"}]"
+    "HEALTHCHECK_TARGETS": "[{\"id\":\"jovlo\",\"name\":\"Jovlo\",\"url\":\"https://jovlo.8xd.io/api/health\",\"projectKey\":\"jovlo\",\"domain\":\"8xd.io\"}]"
   },
   "d1_databases": [
     {

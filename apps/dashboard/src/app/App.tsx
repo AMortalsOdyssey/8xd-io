@@ -91,7 +91,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
     title: "站点监控",
     items: [
       { key: "lawyer", label: "律师主页", hint: "fangliying.com", icon: Scale },
-      { key: "jovlo", label: "Jovlo.ai", hint: "jovlo.8xd.io", icon: Sparkles },
+      { key: "jovlo", label: "Jovlo", hint: "jovlo.8xd.io", icon: Sparkles },
     ],
   },
   {
@@ -116,7 +116,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
 const navTitles: Record<NavKey, string> = {
   overview: "总览",
   lawyer: "律师主页",
-  jovlo: "Jovlo.ai",
+  jovlo: "Jovlo",
   cloudflare: "Cloudflare 核心指标",
   domains: "域名管理",
   workers: "Workers & Pages",
@@ -973,7 +973,7 @@ function JovloView({ snapshot, range }: { snapshot: DashboardSnapshot; range: Ti
   return (
     <div className="full-page">
       <PageHeader
-        title="Jovlo.ai 站点监控"
+        title="Jovlo 站点监控"
         description="jovlo.8xd.io 的健康检查、Worker 请求与子域名流量。健康检查每 15 分钟由 Dashboard Worker 定时执行。"
         action={
           <a className="secondary-button" href="https://jovlo.8xd.io" target="_blank" rel="noreferrer">
