@@ -123,6 +123,10 @@ export interface KpiCard {
   value: string;
   helper: string;
   tone: "blue" | "orange" | "green" | "gray" | "red";
+  /** 指标语义 key，供 buildSnapshot 按时间范围重算数值 */
+  key?: string;
+  /** range = 数值匹配所选时间范围；snapshot = 固定近 30 天快照 */
+  window?: "range" | "snapshot";
 }
 
 export interface DashboardSummary {

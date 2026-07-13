@@ -205,3 +205,22 @@ describe("dashboard snapshot", () => {
     expect(resourceSnapshot.domains.map((domain) => domain.domain)).toEqual(["8xd.io"]);
   });
 });
+
+describe("range-aware KPI cards", () => {
+  it("recomputes request/visit KPIs from daily trends for shorter ranges", () => {
+    const snapshot = buildSnapshot(seedData, "7d", { type: "global", id: "global" });
+    const requestsCard = snapshot.summary.cards.find((card) => card.key === "requests");
+    const expected = Math.round(snapshot.trends.reduce((sum, point) => sum + point.requests, 0));
+
+    expect(requestsCard?.window).toBe("range");
+    expect(requestsCard?.value).toBe(
+      new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(expected),
+    );
+  });
+
+  it("keeps snapshot-window cards marked as 30d metrics", () => {
+    const snapshot = buildSnapshot(seedData, "24h", { type: "global", id: "global" });
+    const kvCard = snapshot.summary.cards.find((card) => card.key === "kvOperations");
+    expect(kvCard?.window).toBe("snapshot");
+  });
+});

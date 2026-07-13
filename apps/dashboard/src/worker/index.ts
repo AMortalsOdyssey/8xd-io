@@ -532,14 +532,14 @@ async function collectDomainMetrics(
     viewer { zones(filter: { zoneTag: $zoneTag }) {
       httpRequests1dGroups(limit: 100, filter: { date_geq: $start, date_leq: $end }, orderBy: [date_ASC]) {
         dimensions { date }
-        sum { requests bytes threats pageViews }
+        sum { requests bytes threats pageViews responseStatusMap { edgeResponseStatus requests } }
       }
     }}
   }`;
 
   for (const zone of zones) {
     const data = await cfGraphql<{
-      viewer: { zones: { httpRequests1dGroups: { dimensions: { date: string }; sum: { requests: number; bytes: number; threats: number; pageViews: number } }[] }[] };
+      viewer: { zones: { httpRequests1dGroups: { dimensions: { date: string }; sum: { requests: number; bytes: number; threats: number; pageViews: number; responseStatusMap: { edgeResponseStatus: number; requests: number }[] } }[] }[] };
     }>(env, query, { zoneTag: zone.id, start, end });
 
     const rows = data.viewer.zones[0]?.httpRequests1dGroups ?? [];
@@ -549,15 +549,19 @@ async function collectDomainMetrics(
         acc.bytes += row.sum.bytes || 0;
         acc.threats += row.sum.threats || 0;
         acc.pageViews += row.sum.pageViews || 0;
+        const dayErrors = (row.sum.responseStatusMap || [])
+          .filter((status) => status.edgeResponseStatus >= 500)
+          .reduce((sum, status) => sum + (status.requests || 0), 0);
         const trend = trendsByDate.get(row.dimensions.date.slice(5)) ?? { requests: 0, visits: 0, errors: 0 };
         trend.requests += row.sum.requests || 0;
         trend.visits += row.sum.pageViews || 0;
+        trend.errors += dayErrors;
         trendsByDate.set(row.dimensions.date.slice(5), trend);
         trendPoints.push({
           date: row.dimensions.date.slice(5),
           requests: row.sum.requests || 0,
           visits: row.sum.pageViews || 0,
-          errors: 0,
+          errors: dayErrors,
           scopeType: "domain",
           scopeId: zone.name,
         });
@@ -615,43 +619,75 @@ async function collectAccountMetrics(env: Env): Promise<MetricRow[]> {
   const end = new Date().toISOString().slice(0, 10);
   const query = `query AccountUsage($accountTag: string!, $start: Date!, $end: Date!) {
     viewer { accounts(filter: { accountTag: $accountTag }) {
-      workersOverviewRequestsAdaptiveGroups(limit: 10000, filter: { date_geq: $start, date_leq: $end }) { count dimensions { scriptName } }
+      workersInvocationsAdaptive(limit: 10000, filter: { date_geq: $start, date_leq: $end }) {
+        sum { requests errors duration cpuTimeUs }
+        dimensions { scriptName }
+      }
       r2StorageAdaptiveGroups(limit: 10000, filter: { date_geq: $start, date_leq: $end }) { dimensions { bucketName } max { objectCount payloadSize } }
+      r2OperationsAdaptiveGroups(limit: 10000, filter: { date_geq: $start, date_leq: $end }) { dimensions { bucketName } sum { requests } }
+      kvStorageAdaptiveGroups(limit: 10000, filter: { date_geq: $start, date_leq: $end }) { dimensions { namespaceId } max { keyCount byteCount } }
       kvOperationsAdaptiveGroups(limit: 10000, filter: { date_geq: $start, date_leq: $end }) { dimensions { namespaceId } sum { requests } }
     }}
   }`;
   const data = await cfGraphql<{
     viewer: { accounts: {
-      workersOverviewRequestsAdaptiveGroups: { count: number; dimensions: { scriptName: string } }[];
+      workersInvocationsAdaptive: { sum: { requests: number; errors: number; duration: number; cpuTimeUs: number }; dimensions: { scriptName: string } }[];
       r2StorageAdaptiveGroups: { dimensions: { bucketName: string }; max: { objectCount: number; payloadSize: number } }[];
+      r2OperationsAdaptiveGroups: { dimensions: { bucketName: string }; sum: { requests: number } }[];
+      kvStorageAdaptiveGroups: { dimensions: { namespaceId: string }; max: { keyCount: number; byteCount: number } }[];
       kvOperationsAdaptiveGroups: { dimensions: { namespaceId: string }; sum: { requests: number } }[];
     }[] };
   }>(env, query, { accountTag: env.CF_ACCOUNT_ID, start, end });
 
   const account = data.viewer.accounts[0];
-  const workerRequestTotals = new Map<string, number>();
-  for (const row of account.workersOverviewRequestsAdaptiveGroups) {
-    const scriptName = row.dimensions.scriptName || "unknown";
-    workerRequestTotals.set(scriptName, (workerRequestTotals.get(scriptName) ?? 0) + row.count);
-  }
-  const r2Storage = account.r2StorageAdaptiveGroups.reduce((max, row) => Math.max(max, row.max.payloadSize || 0), 0);
-  const kvOps = account.kvOperationsAdaptiveGroups.reduce((sum, row) => sum + (row.sum.requests || 0), 0);
-  const workerMetrics = [...workerRequestTotals.entries()].flatMap(([scriptName, requests]) => {
-    const resourceId = workerResourceId(scriptName);
-    return [
-      metric("workerRequests", "Worker 请求", requests, "次", "resource", resourceId),
-      metric("requests", "请求数", requests, "次", "resource", resourceId),
-      metric("workerCpuMs", "CPU 时间", requests > 0 ? requests * 1.6 : 0, "ms", "resource", resourceId, "estimated"),
-      metric("workerWallMs", "总耗时", requests > 0 ? requests * 3.3 : 0, "ms", "resource", resourceId, "estimated"),
-    ];
-  });
+  const metrics: MetricRow[] = [];
 
-  return [
-    ...workerMetrics,
-    metric("r2Storage", "R2 存储", Math.round((r2Storage / 1024 / 1024) * 10) / 10, "MiB", "resource", "r2-share-pages-content"),
-    metric("r2Operations", "R2 操作", 0, "次", "resource", "r2-share-pages-content"),
-    metric("kvOperations", "KV 操作", kvOps, "次", "resource", "kv-share-pages-config"),
-  ];
+  // Workers：请求 / 错误 / CPU 时间 / 总耗时，全部来自 workersInvocationsAdaptive 真实数据
+  const byScript = new Map<string, { requests: number; errors: number; duration: number; cpuTimeUs: number }>();
+  for (const row of account.workersInvocationsAdaptive) {
+    const name = row.dimensions.scriptName || "unknown";
+    const acc = byScript.get(name) ?? { requests: 0, errors: 0, duration: 0, cpuTimeUs: 0 };
+    acc.requests += row.sum.requests || 0;
+    acc.errors += row.sum.errors || 0;
+    acc.duration += row.sum.duration || 0;
+    acc.cpuTimeUs += row.sum.cpuTimeUs || 0;
+    byScript.set(name, acc);
+  }
+  for (const [scriptName, sums] of byScript) {
+    const resourceId = workerResourceId(scriptName);
+    metrics.push(metric("workerRequests", "Worker 请求", sums.requests, "次", "resource", resourceId));
+    metrics.push(metric("requests", "请求数", sums.requests, "次", "resource", resourceId));
+    metrics.push(metric("workerErrors", "Worker 错误", sums.errors, "次", "resource", resourceId));
+    metrics.push(metric("workerCpuMs", "CPU 时间", Math.round(sums.cpuTimeUs / 1000), "ms", "resource", resourceId));
+    metrics.push(metric("workerWallMs", "总耗时", Math.round(sums.duration * 1000), "ms", "resource", resourceId));
+  }
+
+  // R2：按桶存储 / 对象数 / 操作数
+  for (const row of account.r2StorageAdaptiveGroups) {
+    const resourceId = r2ResourceId(row.dimensions.bucketName);
+    metrics.push(metric("r2Storage", "R2 存储", Math.round(((row.max.payloadSize || 0) / 1024 / 1024) * 10) / 10, "MiB", "resource", resourceId));
+    metrics.push(metric("r2Objects", "R2 对象数", row.max.objectCount || 0, "个", "resource", resourceId));
+  }
+  const r2OpsByBucket = new Map<string, number>();
+  for (const row of account.r2OperationsAdaptiveGroups) {
+    const bucket = row.dimensions.bucketName || "unknown";
+    r2OpsByBucket.set(bucket, (r2OpsByBucket.get(bucket) ?? 0) + (row.sum.requests || 0));
+  }
+  for (const [bucket, operations] of r2OpsByBucket) {
+    metrics.push(metric("r2Operations", "R2 操作", operations, "次", "resource", r2ResourceId(bucket)));
+  }
+
+  // KV：按 namespace 键数 / 容量 / 操作数
+  for (const row of account.kvStorageAdaptiveGroups) {
+    const resourceId = kvResourceId(row.dimensions.namespaceId);
+    metrics.push(metric("kvKeys", "KV 键数量", row.max.keyCount || 0, "个", "resource", resourceId));
+    metrics.push(metric("kvStorageKiB", "KV 存储", Math.round(((row.max.byteCount || 0) / 1024) * 10) / 10, "KiB", "resource", resourceId));
+  }
+  for (const row of account.kvOperationsAdaptiveGroups) {
+    metrics.push(metric("kvOperations", "KV 操作", row.sum.requests || 0, "次", "resource", kvResourceId(row.dimensions.namespaceId)));
+  }
+
+  return metrics;
 }
 
 async function collectZoneTrafficBreakdowns(
@@ -953,7 +989,7 @@ export function normalizeResources(input: {
   }
   for (const bucket of input.r2.buckets ?? []) {
     resources.push({
-      id: bucket.name === "share-pages-content" ? "r2-share-pages-content" : `r2-${bucket.name}`,
+      id: r2ResourceId(bucket.name),
       platform: "Cloudflare",
       type: "r2",
       name: bucket.name,
@@ -966,7 +1002,7 @@ export function normalizeResources(input: {
   }
   for (const namespace of input.kv) {
     resources.push({
-      id: String(namespace.id) === "a38b5d84f6294c608b469f92d5cb6d61" ? "kv-share-pages-config" : `kv-${String(namespace.id)}`,
+      id: kvResourceId(String(namespace.id)),
       platform: "Cloudflare",
       type: "kv",
       name: String(namespace.title || namespace.id),
@@ -1413,6 +1449,17 @@ function inferProject(value: string): string {
 
 function workerResourceId(name: string): string {
   return name.includes("share-pages") ? "worker-share-pages" : `worker-${name}`;
+}
+
+function r2ResourceId(bucketName: string): string {
+  const name = bucketName || "unknown";
+  return name === "share-pages-content" ? "r2-share-pages-content" : `r2-${name}`;
+}
+
+function kvResourceId(namespaceId: string): string {
+  // GraphQL 返回的 namespaceId 带连字符，REST 返回的不带，统一后再映射。
+  const normalized = String(namespaceId || "").replace(/-/g, "");
+  return normalized === "a38b5d84f6294c608b469f92d5cb6d61" ? "kv-share-pages-config" : `kv-${normalized}`;
 }
 
 function healthcheckResourceId(id: string): string {

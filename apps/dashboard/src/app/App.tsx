@@ -1380,7 +1380,13 @@ function KpiStrip({ snapshot, compact = false }: { snapshot: DashboardSnapshot; 
           <span>{card.label}</span>
           <strong>{card.value}</strong>
           <small>{card.helper}</small>
-          <em>{card.tone === "red" ? "未处理" : rangeLabels[snapshot.range]}</em>
+          <em>
+            {card.tone === "red"
+              ? "未处理"
+              : card.window === "range"
+                ? rangeLabels[snapshot.range]
+                : "近 30 天"}
+          </em>
         </div>
       ))}
     </div>
@@ -1464,10 +1470,11 @@ function TrendCard({
 function CloudflareMetrics({ snapshot }: { snapshot: DashboardSnapshot }) {
   const metrics: { label: string; value: string; trend: string; danger?: boolean }[] = [
     metricValue(snapshot, "requests", "请求数"),
-    { label: "CPU 时间", value: `${formatNumber(metricNumber(snapshot, "workerCpuMs"))} ms`, trend: "估算" },
-    { label: "总耗时", value: `${formatNumber(metricNumber(snapshot, "workerWallMs"))} ms`, trend: "估算" },
+    { label: "Worker 错误", value: formatNumber(metricNumber(snapshot, "workerErrors")), trend: "真实", danger: metricNumber(snapshot, "workerErrors") > 0 },
+    { label: "CPU 时间", value: `${formatNumber(metricNumber(snapshot, "workerCpuMs"))} ms`, trend: "真实" },
+    { label: "总耗时", value: `${formatNumber(metricNumber(snapshot, "workerWallMs"))} ms`, trend: "真实" },
     metricValue(snapshot, "r2Operations", "R2 操作"),
-    metricValue(snapshot, "kvOperations", "KV 操作", true),
+    metricValue(snapshot, "kvOperations", "KV 操作"),
   ];
 
   return (
@@ -1596,10 +1603,9 @@ function UsagePanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
     <Panel title="用量与配额">
       <QuotaLine label="Workers 请求" value={`${formatNumber(workerRequests)} / 3,000,000（月）`} percent={quotaPercent(workerRequests, 3000000)} />
-      <QuotaLine label="Workers 构建分钟" value="0 / 3,000（月）" percent={0} />
       <QuotaLine label="R2 存储" value={`${formatDecimal(r2Storage)} MiB / 10 GiB（月）`} percent={quotaPercent(r2Storage, 10240)} />
-      <QuotaLine label="R2 Class A 操作" value={`${formatNumber(r2ClassAOperations)} / 1,000,000（月）`} percent={quotaPercent(r2ClassAOperations, 1000000)} />
-      <QuotaLine label="KV 读取" value={`${formatNumber(kvOperations)} / 3,000,000（月）`} percent={quotaPercent(kvOperations, 3000000)} />
+      <QuotaLine label="R2 操作" value={`${formatNumber(r2ClassAOperations)} / 1,000,000（月）`} percent={quotaPercent(r2ClassAOperations, 1000000)} />
+      <QuotaLine label="KV 操作" value={`${formatNumber(kvOperations)} / 3,000,000（月）`} percent={quotaPercent(kvOperations, 3000000)} />
     </Panel>
   );
 }

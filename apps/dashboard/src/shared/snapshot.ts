@@ -327,6 +327,9 @@ export function buildSnapshot(
   activeScope: ScopeRef,
 ): DashboardSnapshot {
   const scopedMetrics = filterRowsForScope(raw.metrics, raw.resources, activeScope);
+  const trends = filterTrends(raw.trends, range, activeScope, raw.metrics, raw.resources);
+  const summary = summarizeRows(raw.metrics, raw.resources, activeScope);
+  applyRangeToSummary(summary, trends, range, activeScope, raw.trends, raw.resources);
 
   return {
     generatedAt: raw.generatedAt,
@@ -334,12 +337,12 @@ export function buildSnapshot(
     scopes: buildScopeTree(raw.resources),
     activeScope,
     range,
-    summary: summarizeRows(raw.metrics, raw.resources, activeScope),
+    summary,
     resources: raw.resources.filter((resource) => resourceInScope(resource, activeScope)),
     metrics: scopedMetrics,
     connectors: connectorCards(raw.connectors),
     connectorRecords: raw.connectors,
-    trends: filterTrends(raw.trends, range, activeScope, raw.metrics, raw.resources),
+    trends,
     domains: filterDomains(raw.domains, activeScope, raw.resources),
     alerts: raw.alerts.filter(
       (alert) => activeScope.type === "global" || alert.scopeId === activeScope.id,
@@ -348,6 +351,42 @@ export function buildSnapshot(
     trafficInsights: buildTrafficInsights(raw, activeScope),
     authProviders: raw.authProviders,
   };
+}
+
+/**
+ * 指标快照固定是近 30 天口径。选择更短时间范围时，请求/访问 KPI 改用
+ * 每日趋势真实数据聚合（仅在该 scope 存在真实趋势行时）并标记为 range 口径；
+ * 无法重算的卡片保持 snapshot 口径，UI 上固定标注"近 30 天"。
+ */
+function applyRangeToSummary(
+  summary: DashboardSummary,
+  trends: TrendPoint[],
+  range: TimeRange,
+  scope: ScopeRef,
+  allTrends: TrendPoint[],
+  resources: ResourceRecord[],
+): void {
+  const hasRealTrends =
+    scope.type === "global" ||
+    allTrends.some((trend) => trendBelongsToScope(trend, resources, scope));
+  if (!hasRealTrends) return;
+
+  const requests = Math.round(trends.reduce((sum, trend) => sum + (trend.requests || 0), 0));
+  const visits = Math.round(trends.reduce((sum, trend) => sum + (trend.visits || 0), 0));
+  for (const card of summary.cards) {
+    if (card.key === "requests") {
+      card.window = "range";
+      if (range !== "30d") card.value = formatCardInteger(requests);
+    }
+    if (card.key === "visits") {
+      card.window = "range";
+      if (range !== "30d") card.value = formatCardInteger(visits);
+    }
+  }
+}
+
+function formatCardInteger(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
 function metric(
