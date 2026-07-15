@@ -1257,6 +1257,9 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.journey-funnel-grid { margin: -1px; }
+.journey-funnel-note { margin: 12px 2px 0; font-size: 12px; line-height: 1.6; }
+
 .breakdown-panel {
   min-height: 380px;
 }

@@ -5,6 +5,7 @@ export type NavKey =
   | "overview"
   | "lawyer"
   | "jovlo"
+  | "journey"
   | "cloudflare"
   | "domains"
   | "workers"
@@ -24,6 +25,7 @@ const NAV_PATHS: Record<NavKey, string> = {
   overview: "/overview",
   lawyer: "/sites/lawyer",
   jovlo: "/sites/jovlo",
+  journey: "/sites/journey-wave",
   domains: "/domains",
   cloudflare: "/cloudflare",
   workers: "/cloudflare/workers",
@@ -104,6 +106,7 @@ export function routesEqual(left: RouteState, right: RouteState): boolean {
 export function pinnedScopeForNav(nav: NavKey): ScopeRef | null {
   if (nav === "lawyer") return { type: "domain", id: "fangliying.com" };
   if (nav === "jovlo") return { type: "hostname", id: "jovlo.8xd.io" };
+  if (nav === "journey") return { type: "hostname", id: "journey-wave.8xd.io" };
   return null;
 }
 

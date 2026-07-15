@@ -1342,7 +1342,7 @@ async function loadPageEventBreakdowns(db: D1Database): Promise<TrafficBreakdown
   ];
 }
 
-function mapEventRows(
+export function mapEventRows(
   rows: Record<string, unknown>[],
   kind: TrafficBreakdown["kind"],
   unit: TrafficBreakdown["unit"],
@@ -1352,16 +1352,17 @@ function mapEventRows(
     const scopeId = String(row.scope_id || "fangliying.com");
     const rawLabel = String(row.label || "未知");
     const label = simplify && kind === "referrer" ? simplifyReferrer(rawLabel) : rawLabel;
+    const scopeType = scopeId.split(".").length > 2 ? "hostname" : "domain";
     return breakdown(
       `event-${kind}-${scopeId}-${index}-${slug(label)}`,
-      "domain",
+      scopeType,
       scopeId,
       kind,
       label,
       Number(row.value || 0),
       unit,
       "instrumented",
-      "来自律师主页浏览器端 pageview 埋点，不包含被拦截的脚本、关闭 JS 的访问或纯资源请求。",
+      "来自浏览器端站内埋点，不包含被拦截的脚本、关闭 JS 的访问或纯资源请求。",
     );
   });
 }

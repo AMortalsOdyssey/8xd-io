@@ -15,6 +15,7 @@ describe("dashboard router", () => {
       "overview",
       "lawyer",
       "jovlo",
+      "journey",
       "cloudflare",
       "domains",
       "workers",
@@ -79,6 +80,13 @@ describe("dashboard router", () => {
       scope: { type: "domain", id: "fangliying.com" },
     });
     expect(normalized.scope).toEqual({ type: "hostname", id: "jovlo.8xd.io" });
+
+    const journey = normalizeRoute({
+      nav: "journey",
+      range: "30d",
+      scope: { type: "global", id: "global" },
+    });
+    expect(journey.scope).toEqual({ type: "hostname", id: "journey-wave.8xd.io" });
 
     const lawyer = normalizeRoute({
       nav: "lawyer",

@@ -12,6 +12,7 @@ import type {
 
 const PROJECT_LABELS: Record<string, string> = {
   jovlo: "Jovlo",
+  "journey-wave": "JourneyWave",
   "share-pages": "Share Pages",
   "lawyer-homepage": "律师主页",
   shared: "共享资源",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHealthyResponse, normalizeResources, parseHealthcheckTargets } from "../src/worker/index";
+import { isHealthyResponse, mapEventRows, normalizeResources, parseHealthcheckTargets } from "../src/worker/index";
 
 describe("dashboard monitoring discovery", () => {
   it("associates a Worker with its official custom domain", () => {
@@ -75,5 +75,18 @@ describe("dashboard monitoring discovery", () => {
     expect(isHealthyResponse(true, { ok: false })).toBe(false);
     expect(isHealthyResponse(true, null)).toBe(false);
     expect(isHealthyResponse(false, { ok: true })).toBe(false);
+  });
+
+  it("keeps product events scoped to their hostname", () => {
+    const rows = mapEventRows([
+      { scope_id: "journey-wave.8xd.io", label: "first_draw", value: 12 },
+    ], "event", "views");
+    expect(rows[0]).toMatchObject({
+      scopeType: "hostname",
+      scopeId: "journey-wave.8xd.io",
+      label: "first_draw",
+      value: 12,
+      source: "instrumented",
+    });
   });
 });

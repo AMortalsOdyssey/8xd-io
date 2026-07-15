@@ -24,6 +24,7 @@ import {
   Shield,
   Sparkles,
   Users,
+  Waves,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -92,6 +93,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
     items: [
       { key: "lawyer", label: "律师主页", hint: "fangliying.com", icon: Scale },
       { key: "jovlo", label: "Jovlo", hint: "jovlo.8xd.io", icon: Sparkles },
+      { key: "journey", label: "JourneyWave", hint: "journey-wave.8xd.io", icon: Waves },
     ],
   },
   {
@@ -117,6 +119,7 @@ const navTitles: Record<NavKey, string> = {
   overview: "总览",
   lawyer: "律师主页",
   jovlo: "Jovlo",
+  journey: "JourneyWave",
   cloudflare: "Cloudflare 核心指标",
   domains: "域名管理",
   workers: "Workers & Pages",
@@ -651,6 +654,7 @@ const siteNavByScopeId: Record<string, NavKey> = {
   "fangliying.com": "lawyer",
   "www.fangliying.com": "lawyer",
   "jovlo.8xd.io": "jovlo",
+  "journey-wave.8xd.io": "journey",
 };
 
 /** 「查看详情」的正确落点：zone 的指标挂在 domain scope 下，健康检查跳它监控的子域名 */
@@ -692,6 +696,7 @@ function PageContent({
   if (nav === "cloudflare") return <CloudflareView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
   if (nav === "lawyer") return <LawyerHomepageView snapshot={snapshot} />;
   if (nav === "jovlo") return <JovloView snapshot={snapshot} range={range} />;
+  if (nav === "journey") return <JourneyWaveView snapshot={snapshot} range={range} />;
   if (nav === "domains") return <DomainsView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
   if (nav === "workers") return <WorkersPagesView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
   if (nav === "storage") return <StorageView snapshot={snapshot} onOpenScope={openScopeDashboard} />;
@@ -1013,6 +1018,105 @@ function JovloView({ snapshot, range }: { snapshot: DashboardSnapshot; range: Ti
       <div className="notice subtle">
         健康检查与 Worker 请求为真实数据；子域名请求 / 访问按近 24 小时真实 host 分布比例外推 30 天总量，属于估算值。
       </div>
+    </div>
+  );
+}
+
+const journeyEventLabels: Record<string, string> = {
+  landing_view: "进入海面",
+  first_draw: "首次捞瓶",
+  first_ripple: "首次涟漪",
+  throw_start: "开始许愿",
+  throw_done: "完成投瓶",
+  share_click: "发起分享",
+  tide_open: "打开潮汐",
+  echo_view: "查看回信",
+  pageview: "页面浏览",
+};
+
+function JourneyWaveView({ snapshot, range }: { snapshot: DashboardSnapshot; range: TimeRange }) {
+  const hostname = "journey-wave.8xd.io";
+  const health = snapshot.resources.find(
+    (resource) => resource.type === "connector" && resource.hostnames.includes(hostname),
+  );
+  const healthMeta = (health?.metadata ?? {}) as {
+    url?: string;
+    httpStatus?: number;
+    responseMs?: number;
+    error?: string;
+  };
+  const isUp = health?.status === "active";
+  const responseMs = health ? metricForScope(snapshot, "responseMs", "resource", health.id) : 0;
+  const requests = metricForScope(snapshot, "requests", "hostname", hostname);
+  const visits = metricForScope(snapshot, "visits", "hostname", hostname);
+  const worker = snapshot.resources.find(
+    (resource) => resource.type === "worker" && resource.hostnames.includes(hostname),
+  );
+  const workerRequests = worker ? metricForScope(snapshot, "workerRequests", "resource", worker.id) : 0;
+  const eventRows = snapshot.trafficBreakdowns
+    .filter((row) => row.scopeId === hostname && row.kind === "event" && row.source === "instrumented")
+    .map((row) => ({ ...row, label: journeyEventLabels[row.label] ?? row.label }));
+  const eventCount = (name: string) => snapshot.trafficBreakdowns
+    .filter((row) => row.scopeId === hostname && row.kind === "event" && row.label === name)
+    .reduce((sum, row) => sum + row.value, 0);
+  const landings = eventCount("landing_view");
+  const draws = eventCount("first_draw");
+  const ripples = eventCount("first_ripple");
+  const throws = eventCount("throw_done");
+  const shares = eventCount("share_click");
+  const conversion = (value: number) => landings > 0 ? `${Math.round((value / landings) * 100)}%` : "—";
+
+  return (
+    <div className="full-page">
+      <PageHeader
+        title="JourneyWave 产品监控"
+        description="服务健康、Cloudflare 流量与核心产品事件集中在同一页。产品事件来自站内匿名埋点，不保存原始 IP。"
+        action={
+          <a className="secondary-button" href={`https://${hostname}`} target="_blank" rel="noreferrer">
+            <Waves size={15} />
+            {hostname}
+          </a>
+        }
+      />
+      {health ? (
+        <div className={isUp ? "site-status up" : "site-status down"}>
+          {isUp ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+          <div>
+            <strong>{isUp ? "服务正常" : "服务异常"}</strong>
+            <span className="cell-ellipsis">
+              {healthMeta.url || `https://${hostname}/api/health`}
+              {healthMeta.error ? ` · ${healthMeta.error}` : ""}
+            </span>
+          </div>
+          <span className="muted">最近检查：{health.lastSyncedAt ? formatDateTime(health.lastSyncedAt) : "待同步"}</span>
+        </div>
+      ) : (
+        <div className="notice">健康检查数据待首次同步，点击右上角「刷新」可立即触发。</div>
+      )}
+      <div className="lawyer-kpis">
+        <MetricInline label="HTTP 状态" value={healthMeta.httpStatus ? String(healthMeta.httpStatus) : "—"} status="真实" />
+        <MetricInline label="响应时间" value={responseMs || healthMeta.responseMs ? `${formatNumber(responseMs || Number(healthMeta.responseMs))} ms` : "—"} status="真实" />
+        <MetricInline label="Worker 请求" value={formatNumber(workerRequests)} status={worker ? worker.name : "journey-wave"} />
+        <MetricInline label="子域名请求" value={formatNumber(requests)} status="估算" />
+        <MetricInline label="子域名访问" value={formatNumber(visits)} status="估算" />
+        <MetricInline label="时间范围" value={rangeLabels[range]} status="Cloudflare" />
+      </div>
+      <Panel title="首版核心行为（近 30 天事件次数）">
+        <div className="lawyer-kpis journey-funnel-grid">
+          <MetricInline label="进入海面" value={formatNumber(landings)} status="基线" />
+          <MetricInline label="首次捞瓶" value={formatNumber(draws)} status={conversion(draws)} />
+          <MetricInline label="首次涟漪" value={formatNumber(ripples)} status={conversion(ripples)} />
+          <MetricInline label="完成投瓶" value={formatNumber(throws)} status={conversion(throws)} />
+          <MetricInline label="发起分享" value={formatNumber(shares)} status={conversion(shares)} />
+        </div>
+        <p className="muted journey-funnel-note">百分比以「进入海面」事件次数为分母，用于趋势观察，不等同于去重用户转化率。</p>
+      </Panel>
+      <div className="analytics-grid">
+        <BreakdownBarPanel title="产品事件分布" rows={eventRows.sort((a, b) => b.value - a.value)} />
+        <BreakdownBarPanel title="访问页面 / 路径" rows={topBreakdowns(snapshot.trafficBreakdowns.filter((row) => row.scopeId === hostname), "path")} />
+      </div>
+      {snapshot.trends.length ? <TrendCard title="请求趋势" trends={snapshot.trends} compact /> : null}
+      <div className="notice subtle">健康检查与站内产品事件为真实数据；子域名请求 / 访问仍是按 host 分布外推的估算值。</div>
     </div>
   );
 }
