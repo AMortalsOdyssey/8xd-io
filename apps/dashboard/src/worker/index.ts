@@ -396,8 +396,8 @@ async function runHealthChecks(env: Env): Promise<void> {
         signal: AbortSignal.timeout(8_000),
       });
       httpStatus = response.status;
-      const body = (await response.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
-      status = response.ok && body?.data?.ok !== false ? "up" : "down";
+      const body = (await response.json().catch(() => null)) as HealthResponseBody;
+      status = isHealthyResponse(response.ok, body) ? "up" : "down";
       if (status === "down") errorMessage = `HTTP ${response.status}`;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
@@ -442,6 +442,12 @@ async function runHealthChecks(env: Env): Promise<void> {
   }
 
   await env.DB.prepare("DELETE FROM health_check_runs WHERE checked_at < datetime('now', '-30 days')").run();
+}
+
+type HealthResponseBody = { ok?: boolean; data?: { ok?: boolean } } | null;
+
+export function isHealthyResponse(responseOk: boolean, body: HealthResponseBody): boolean {
+  return responseOk && (body?.ok === true || body?.data?.ok === true);
 }
 
 async function collectCloudflare(env: Env): Promise<RawDashboardData> {
@@ -1441,6 +1447,7 @@ function parseJson<T>(value: unknown, fallback: T): T {
 }
 
 function inferProject(value: string): string {
+  if (value.includes("journey-wave")) return "journey-wave";
   if (value.includes("jovlo")) return "jovlo";
   if (value.includes("fangliying")) return "lawyer-homepage";
   if (value.includes("8xd") || value.includes("share-pages")) return "share-pages";
